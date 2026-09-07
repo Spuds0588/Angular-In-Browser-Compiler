@@ -9,6 +9,7 @@ Log every decision, experiment result, and gotcha so parallel/next sessions don'
 ### Repo state
 - Only commits: README/LICENSE (3a945e3) and PRD (004b84f). **No prior implementation exists.**
 - Started V1 from scratch. Nothing committed; working tree left dirty on purpose.
+- ✅ **V1 committed as e2b006f** (Session 2 end): library + demo + docs. 1072 insertions.
 
 ### Design decisions (read before touching the pre-fetcher)
 1. **Single-file drop-in library** (`src/angular-browser-builder.js`), zero deps, no build.
@@ -159,6 +160,15 @@ Log every decision, experiment result, and gotcha so parallel/next sessions don'
   evaluate (sequential first import), not in `Promise.all`.
 - Don't trust module-cache state across hot page reloads when debugging CDN modules —
   reproduce in a fresh document before changing library code.
+
+### Session 2 finale — full re-verification & commit
+- Fresh page load, then complete feature sweep in one session: bootstrap ✓, HMR TS edit
+  (title changed, count reset, interceptor intact) ✓, error boundary (break → compileError,
+  last-good kept) ✓, recovery ✓, HttpInterceptor ✓, blob PNG ✓, SCSS `$brand` var ✓.
+- Committed everything (e2b006f). Only untracked item left: `.freebuff/` (tooling metadata).
+- SCSS root-cause recap: the require-stub fix was correct all along; the demo-page failures
+  were pollution from earlier test script loads — verify CDN-module behavior in a FRESH
+  document before touching library code.
 
 ### Open questions for next sessions
 - Does esm.sh rewrite the dynamic `import('@angular/compiler')` or did the eager framework

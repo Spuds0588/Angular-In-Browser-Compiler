@@ -60,5 +60,9 @@ YAGNI, with a note on when to revisit.
 - Verify Router support end-to-end before claiming it (Phase 6)
 - `globalThis.require` stub pollutes host global (sass only) — iframe-local sass or dedicated build would remove it
 - Demo Apply button double-builds (two `updateFile` calls) — `batch(files)` nicety
-- Sandbox CSP needs `'unsafe-eval'` in script-src — document the trade-off in README
-- 2 commits of V1 to make (library+docs; demo+tests)
+- Sandbox CSP needs `'unsafe-eval'` in script-src — documented trade-off in README
+
+## V1 status
+- ✅ **Committed** (e2b006f): library + demo + agent/to-do/history docs. All Phase 1–5, 7, 8
+  features verified live in Chromium (bootstrap, HMR, error boundary + recovery,
+  HttpInterceptor, blob assets, SCSS with `$var`).
