@@ -23,8 +23,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/configure-pages@v5
+      # Deploy the repo root: the demo at /demo/ imports ../src/..., so the
+      # whole repo must be published (root index.html redirects to ./demo/).
       - uses: actions/upload-pages-artifact@v3
         with:
-          path: demo
+          path: .
       - uses: actions/deploy-pages@v4
         id: deployment
