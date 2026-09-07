@@ -215,6 +215,22 @@ Log every decision, experiment result, and gotcha so parallel/next sessions don'
   minified classes make `constructor.name` useless ('t' = both LocationStrategy AND
   PathLocationStrategy in common.mjs).
 
+### Session 3 addendum — deploy & live verification
+- Pushed to GitHub (`Spuds0588/Angular-In-Browser-Compiler`), enabled GitHub Pages via
+  Actions (`build_type=workflow`), site: https://spuds0588.github.io/Angular-In-Browser-Compiler/
+  (root `index.html` redirects to `./demo/`).
+- **Deploy gotcha**: publishing ONLY `demo/` broke the page — `controls.js` imports
+  `'../src/angular-browser-builder.js'`, so `src/` 404'd and the module graph died
+  (status stuck at `idle`, no console error other than a 404). Fix: publish the whole
+  repo root + a root redirect index. The builder import MUST resolve from the demo dir.
+- Verified the LIVE site with headless Chrome (`google-chrome-stable --headless=new`
+  driven over CDP with the `ws` npm package — Node 20 has no global WebSocket, and
+  `--dump-dom --virtual-time-budget` exits before the async esm.sh bootstrap). Fresh
+  `--user-data-dir` per run is mandatory — a stale profile served cached 404s and
+  misled two debug runs. All green on Pages: boot, HttpInterceptor data, +1, About
+  navigation + active class, host URL stays on github.io (MemoryLocationStrategy).
+- Node v20 note: global `WebSocket` requires v22+; use `ws` from a scratch npm dir.
+
 ### Session 3 finale — full regression sweep (all ✓)
 bootstrap → Home (interceptor data) → +1 ×2 (count 2) → About (active class, host URL
 unchanged) → `Location.back()` (Home re-renders, About destroyed) → HMR title edit
