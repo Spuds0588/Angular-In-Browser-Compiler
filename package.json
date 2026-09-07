@@ -1,0 +1,22 @@
+{
+  "name": "angular-browser-builder",
+  "version": "0.1.0",
+  "description": "Front-end only, zero-backend, in-browser compiler and builder for Angular (v17+) apps. Drop-in ESM library.",
+  "type": "module",
+  "main": "src/angular-browser-builder.js",
+  "exports": {
+    ".": "./src/angular-browser-builder.js"
+  },
+  "files": [
+    "src"
+  ],
+  "keywords": [
+    "angular",
+    "compiler",
+    "browser",
+    "jit",
+    "sandbox",
+    "csp"
+  ],
+  "license": "MIT"
+}

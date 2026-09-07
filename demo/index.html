@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Angular In-Browser Builder — Demo</title>
+<!-- Strict CSP for the host page: no unsafe-inline, no eval in host code.
+     The sandboxed iframe is a srcdoc document that INHERITS this policy, so the
+     runner is delivered as an external blob: script and eval (needed by the CJS
+     wrapper + Angular JIT) is confined to the iframe only. -->
+<meta http-equiv="Content-Security-Policy"
+  content="default-src 'self';
+           script-src 'self' https://cdn.jsdelivr.net https://esm.sh blob: 'unsafe-eval';
+           style-src 'self' 'unsafe-inline';
+           img-src 'self' data: blob:;
+           font-src 'self' data: blob:;
+           frame-src 'self' data: blob:;
+           connect-src 'self' https://esm.sh https://cdn.jsdelivr.net https://unpkg.com;
+           object-src 'none'; base-uri 'self'">
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 13px; background: #f6f7f9; }
+  header { padding: 8px 12px; background: #1e293b; color: #e2e8f0; display: flex; gap: 16px; align-items: center; }
+  header h1 { font-size: 14px; margin: 0; }
+  main { display: grid; grid-template-columns: 380px 1fr; gap: 12px; padding: 12px; height: calc(100vh - 130px); }
+  section.panel { background: #fff; border: 1px solid #ddd; border-radius: 6px; overflow: hidden; display: flex; flex-direction: column; }
+  section.panel > h2 { margin: 0; padding: 6px 10px; font-size: 12px; text-transform: uppercase; color: #64748b; border-bottom: 1px solid #eee; }
+  #editor textarea { width: 100%; flex: 1; border: 0; padding: 8px; resize: none; font: inherit; }
+  #controls { padding: 8px; display: flex; flex-wrap: wrap; gap: 6px; border-top: 1px solid #eee; align-items: center; }
+  #controls button { padding: 4px 10px; cursor: pointer; }
+  #controls label { display: flex; gap: 4px; align-items: center; font-size: 12px; color: #475569; }
+  #frame-host { flex: 1; }
+  #logs { flex: 1; overflow: auto; padding: 6px 10px; margin: 0; list-style: none; }
+  #logs li { white-space: pre-wrap; word-break: break-all; border-bottom: 1px dashed #eee; padding: 3px 0; }
+  #logs li.error { color: #b91c1c; }
+  #logs li.warn { color: #b45309; }
+  #status { margin-left: auto; font-size: 12px; }
+  #status.ok { color: #16a34a; } #status.bad { color: #dc2626; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Angular In-Browser Builder</h1>
+  <span id="status">idle</span>
+</header>
+<main>
+  <section class="panel" id="editor">
+    <h2>src/app/app.component.ts</h2>
+    <textarea id="ts-editor" spellcheck="false"></textarea>
+    <h2>src/app/app.component.html</h2>
+    <textarea id="html-editor" spellcheck="false"></textarea>
+    <div id="controls">
+      <button id="btn-apply">Apply edits (soft reload)</button>
+      <button id="btn-break">Break it</button>
+      <button id="btn-fix">Fix it</button>
+    </div>
+  </section>
+  <section class="panel">
+    <h2>Sandboxed iframe (srcdoc; eval confined to sandbox)</h2>
+    <div id="frame-host"></div>
+  </section>
+</main>
+<section class="panel" style="margin: 0 12px 12px; height: 130px;">
+  <h2>Structured logs (host receives postMessage from the sandbox)</h2>
+  <ul id="logs"></ul>
+</section>
+<script type="module" src="./controls.js"></script>
+</body>
+</html>
