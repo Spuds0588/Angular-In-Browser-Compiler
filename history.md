@@ -170,6 +170,59 @@ Log every decision, experiment result, and gotcha so parallel/next sessions don'
   were pollution from earlier test script loads — verify CDN-module behavior in a FRESH
   document before touching library code.
 
+## 2026-09-07 — Session 3: Router support (Phase 6) + batch() API
+
+### What landed (all verified live in Chromium)
+- **Auto-injected `MemoryLocationStrategy` + `APP_BASE_HREF: '/'`** in `_injectShims`, plus
+  a Router demo (`provideRouter`, shell + Home/About routes, `RouterLink(Active)`/`RouterOutlet`).
+  Verified: bootstrap, link navigation, active-link classes, `Location.back()` re-render,
+  routed component teardown on nav, host URL never changes.
+- **`builder.batch(files)`** — atomic multi-file update, ONE build. Demo Apply/Fix now use it
+  (the old double-build is gone).
+- **Root-element injection cleanup**: `rebuild()` now skips selectors used as tags in
+  templates, and when a template has `<router-outlet` only the first selector (the shell)
+  is pre-created — no more phantom empty `<app-home>`/`<app-about>` skeletons in the DOM.
+- **`_injectShims` balanced-paren scan**: the old `bootstrapApplication\s*\(([^)]*)\)` regex
+  truncates at the first `)` — breaks any config with nested parens like
+  `provideRouter(routes)`. Replaced with a depth-counting scan.
+
+### The Router debugging saga (do not repeat)
+- **Symptom**: `NG04002: Cannot match any routes. URL Segment: 'srcdoc'` — the Router's
+  initial URL was `about:srcdoc`'s pathname. Root cause (forensic, ~1h): `useClass` on an
+  UNDECORATED class in the shim. `LocationStrategy` in @angular/common is
+  `@Injectable({providedIn: 'root', useFactory: () => inject(PathLocationStrategy)})`, and
+  Angular's inherited-factory fallback (`wI` in core.mjs) walks the CONSTRUCTOR prototype
+  chain: `MemoryLocationStrategy.ɵfac/ɵprov` resolves to `LocationStrategy`'s — so
+  `useClass: MemoryLocationStrategy` silently instantiated via the INHERITED ɵprov factory
+  → **PathLocationStrategy**, with the deprecation warning
+  ("instantiates a token that inherits its @Injectable decorator") as the telltale.
+  **Fix: `{ provide: LocationStrategy, useFactory: () => new MemoryLocationStrategy() }`**
+  — `useFactory` bypasses the inherited lookup entirely. (Alternative: `@Injectable()` on
+  the shim class.)
+- **Second bug**: `Location.getState()` — Angular 17's `Location` calls
+  `strategy.getState()` for router `restoredState` during initial navigation. Add
+  `getState() { return null; }`.
+- **Third bug**: `Location.back()` changed the strategy's path but the Router never knew
+  (no popstate). Fixed by storing the `onPopState` listener and firing it (with a synthetic
+  `{pop:true,type:'popstate'}` event) ONLY in `back()`/`forward()` — never in
+  pushState/replaceState (those are router-initiated; notifying would loop).
+- **DI duplicate-token rule verified empirically**: same injector, LAST provider wins.
+  `provideRouter` (v17) provides NO LocationStrategy; the default Path comes from
+  `LocationStrategy`'s own providedIn:root factory — so the app injector gets the strategy
+  even with zero router setup, and our shim must override it explicitly.
+- **Debugging technique that paid off**: `inj.records` (Map token→record) on the app
+  injector + `inj.parent` chain; `instanceof` checks against `mod.PathLocationStrategy`;
+  minified classes make `constructor.name` useless ('t' = both LocationStrategy AND
+  PathLocationStrategy in common.mjs).
+
+### Session 3 finale — full regression sweep (all ✓)
+bootstrap → Home (interceptor data) → +1 ×2 (count 2) → About (active class, host URL
+unchanged) → `Location.back()` (Home re-renders, About destroyed) → HMR title edit
+(re-boot, count reset, router still navigates) → break (compileError, last-good kept) →
+fix (recovery) → SCSS `$brand: #7c3aed` (h1 + active link colors verified, router intact).
+
+---
+
 ### Open questions for next sessions
 - Does esm.sh rewrite the dynamic `import('@angular/compiler')` or did the eager framework
   import mask it? (Check by removing compiler from the always-imported set.)

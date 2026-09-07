@@ -242,6 +242,9 @@ export class AngularBrowserBuilder {
 
   updateFile(path, content) { this.files.set(path, content); return this.rebuild(); }
 
+  /** Atomically apply several file edits with a single rebuild (one build, not N). */
+  batch(files) { for (const [p, c] of Object.entries(files)) this.files.set(p, c); return this.rebuild(); }
+
   deleteFile(path) { this.files.delete(path); return this.rebuild(); }
 
   /* ------------------------------------------------------------ pipeline */
@@ -250,7 +253,7 @@ export class AngularBrowserBuilder {
     this.log('Pipeline', 'info', 'build started', { files: this.files.size });
     try {
       const ts = await this._loadTypescript();
-      const specs = new Set(['@angular/common/http', 'rxjs', '@angular/compiler']);
+      const specs = new Set(['@angular/common', '@angular/common/http', 'rxjs', '@angular/compiler']);
       for (const [path, src] of this.files) {
         if (extname(path) === 'ts') for (const s of extractImports(src)) if (isExternalSpec(s)) specs.add(s);
       }
@@ -292,10 +295,18 @@ export class AngularBrowserBuilder {
         }
       }
 
-      const roots = [
-        ...new Set([...this.files.values()].flatMap((src) =>
+      /* Root elements to pre-create in the sandbox (VFS has no index.html, so
+         bootstrapApplication needs a host element). Skip selectors used as tags in
+         templates; when a template has a <router-outlet>, only the first selector
+         (the shell) is pre-created — the Router instantiates routed components. */
+      const srcs = [...this.files.values()];
+      const usedTags = new Set(srcs.flatMap((src) => [...src.matchAll(/<([a-z][\w-]*)/g)].map((m) => m[1])));
+      const allSelectors = [
+        ...new Set(srcs.flatMap((src) =>
           [...src.matchAll(/selector\s*:\s*['"]([^'"]+)['"]/g)].map((m) => m[1]))),
       ];
+      const routed = srcs.some((src) => src.includes('<router-outlet'));
+      const roots = allSelectors.filter((s, i) => !usedTags.has(s) && !(routed && i > 0));
       this.lastGood = { main: this.main, modules, externals, assets, roots };
       this._ensureFrame();
       if (this.booted) {
@@ -382,10 +393,14 @@ export class AngularBrowserBuilder {
     return (await sass.compileStringAsync(src)).css;
   }
 
-  /** Auto-inject provideHttpClient + VFS HttpInterceptor into main.ts (source-level). */
+  /** Auto-inject provider shims into main.ts (source-level): VFS HttpInterceptor +
+   *  provideHttpClient, and a MemoryLocationStrategy so the Router never touches the
+   *  HOST URL (the srcdoc iframe shares the parent's location — PathLocationStrategy
+   *  would pushState on the host's history). */
   _injectShims(src) {
     const shims = `
 const { HTTP_INTERCEPTORS, HttpResponse, provideHttpClient, withInterceptorsFromDi } = require('@angular/common/http');
+const { LocationStrategy, APP_BASE_HREF } = require('@angular/common');
 const { of } = require('rxjs');
 class VfsHttpInterceptor {
   intercept(req, next) {
@@ -401,16 +416,51 @@ class VfsHttpInterceptor {
     return next.handle(req);
   }
 }
-const SHIM_PROVIDERS = [ provideHttpClient(withInterceptorsFromDi()), { provide: HTTP_INTERCEPTORS, useClass: VfsHttpInterceptor, multi: true } ];
+class MemoryLocationStrategy extends LocationStrategy {
+  constructor() { super(); this._path = '/'; this._stack = ['/']; this._i = 0; this._listeners = []; }
+  path() { return this._path; }
+  prepareExternalUrl(internal) { return internal; }
+  pushState(s, t, url) {
+    this._stack = this._stack.slice(0, this._i + 1);
+    this._stack.push(url || '/');
+    this._i++;
+    this._path = url || '/';
+  }
+  replaceState(s, t, url) { this._path = url || '/'; }
+  forward() { if (this._i < this._stack.length - 1) { this._i++; this._move(this._stack[this._i]); } }
+  back() { if (this._i > 0) { this._i--; this._move(this._stack[this._i]); } }
+  /* Notify the Router's location listener ONLY on back/forward — pushState/replaceState
+     were initiated BY the router, so re-navigating there would loop. */
+  _move(p) {
+    this._path = p;
+    for (const fn of this._listeners) { try { fn({ pop: true, type: 'popstate', state: null }); } catch (e) {} }
+  }
+  onPopState(fn) { this._listeners.push(fn); return () => {}; }
+  getBaseHref() { return '/'; }
+  getState() { return null; }
+}
+const SHIM_PROVIDERS = [
+  provideHttpClient(withInterceptorsFromDi()),
+  { provide: HTTP_INTERCEPTORS, useClass: VfsHttpInterceptor, multi: true },
+  { provide: LocationStrategy, useFactory: () => new MemoryLocationStrategy() },
+  { provide: APP_BASE_HREF, useValue: '/' },
+];
 `;
-    const out = shims + src.replace(/bootstrapApplication\s*\(([^)]*)\)/, (_m, args) => {
-      const i = args.indexOf(',');
-      if (i === -1) return `bootstrapApplication(${args}, { providers: SHIM_PROVIDERS })`;
-      const comp = args.slice(0, i).trim();
-      const cfg = args.slice(i + 1).trim();
-      return `bootstrapApplication(${comp}, { ...(${cfg} || {}), providers: [...(${cfg}.providers || []), ...SHIM_PROVIDERS] })`;
-    });
-    return out;
+    const m = src.match(/bootstrapApplication\s*\(/);
+    if (!m) return shims + src;
+    /* Balanced-paren scan — the config object can hold nested parens (e.g.
+       provideRouter(routes)); a naive `([^)]*)` regex would truncate at the first `)`. */
+    let depth = 1, i = m.index + m[0].length;
+    while (depth > 0 && i < src.length) { if (src[i] === '(') depth++; else if (src[i] === ')') depth--; i++; }
+    const args = src.slice(m.index + m[0].length, i - 1).trim();
+    const c = args.indexOf(',');
+    const rest = src.slice(i);
+    if (c === -1) return shims + src.slice(0, m.index) + `bootstrapApplication(${args}, { providers: SHIM_PROVIDERS })` + rest;
+    const comp = args.slice(0, c).trim();
+    const cfg = args.slice(c + 1).trim();
+    return shims + src.slice(0, m.index) +
+      `bootstrapApplication(${comp}, { ...(${cfg} || {}), providers: [...(${cfg}.providers || []), ...SHIM_PROVIDERS] })` +
+      rest;
   }
 
   /** templateUrl -> template: require(...); styleUrl(s) -> styles: [require(...)]. */

@@ -37,7 +37,7 @@ YAGNI, with a note on when to revisit.
 - [x] Auto-injected `HttpInterceptor` (VFS-backed `HttpClient`) + `provideHttpClient` merged into `bootstrapApplication` config
 - [x] Blob URL generator + HTML/CSS regex replacer for `assets/` refs
 - [x] `window.process = { env: { NODE_ENV: 'development' } }` shim in iframe
-- [ ] `MemoryLocationStrategy` for Router — (deferred; add with the first Router demo — needs `provideRouter` + `APP_BASE_HREF` analysis)
+- [x] `MemoryLocationStrategy` for Router (auto-injected into `bootstrapApplication` config) + `APP_BASE_HREF: '/'` shim; Router demo with `provideRouter`, `RouterLink`/`RouterLinkActive`/`RouterOutlet`, and back/forward via the memory strategy's popstate listeners. Verified: navigation, active states, host URL never changes.
 
 ## Phase 7: SCSS
 - [x] Lazy Dart Sass (`esm.sh/sass@1.86.3` default mode, `compileStringAsync`) on first `.scss`, with `globalThis.require` stub installed before first import (esm.sh shim calls `require('url')`)
@@ -57,9 +57,9 @@ YAGNI, with a note on when to revisit.
 - Global `styles.css` from angular.json is not supported (components' styles only)
 - Template refs to non-asset URLs (e.g. `http://...`) left as-is
 - esm.sh CSS imports in third-party bundles can break `import()` (MIME); framework set unaffected
-- Verify Router support end-to-end before claiming it (Phase 6)
+- Router verified end-to-end (session 3): navigate, active states, back/forward, host URL untouched. `MemoryLocationStrategy` back/forward only works through in-app triggers (links, `Location.back()`) — browser back-button won't drive it (by design: it must never touch the host history)
 - `globalThis.require` stub pollutes host global (sass only) — iframe-local sass or dedicated build would remove it
-- Demo Apply button double-builds (two `updateFile` calls) — `batch(files)` nicety
+- ✅ Demo Apply/Fix now use `builder.batch(files)` — one build per apply (added in session 3)
 - Sandbox CSP needs `'unsafe-eval'` in script-src — documented trade-off in README
 
 ## V1 status

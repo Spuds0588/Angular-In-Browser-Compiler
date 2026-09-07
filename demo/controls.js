@@ -29,8 +29,10 @@ builder.on('compileError', (e) => { statusEl.textContent = 'compile error (last-
 builder.on('runtimeError', (e) => { statusEl.textContent = 'runtime error (last-good kept)'; statusEl.className = 'bad'; window.__LAST_ERR__ = e; });
 
 $('btn-apply').addEventListener('click', () => {
-  builder.updateFile('src/app/app.component.ts', $('ts-editor').value);
-  builder.updateFile('src/app/app.component.html', $('html-editor').value);
+  builder.batch({
+    'src/app/app.component.ts': $('ts-editor').value,
+    'src/app/app.component.html': $('html-editor').value,
+  });
 });
 
 $('btn-break').addEventListener('click', () => {
@@ -41,8 +43,10 @@ $('btn-break').addEventListener('click', () => {
 $('btn-fix').addEventListener('click', () => {
   $('ts-editor').value = GOOD_TS;
   $('html-editor').value = GOOD_HTML;
-  builder.updateFile('src/app/app.component.ts', GOOD_TS);
-  builder.updateFile('src/app/app.component.html', GOOD_HTML);
+  builder.batch({
+    'src/app/app.component.ts': GOOD_TS,
+    'src/app/app.component.html': GOOD_HTML,
+  });
 });
 
 statusEl.textContent = 'building…';

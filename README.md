@@ -60,7 +60,7 @@ log panel).
 
 | Method | Purpose |
 | --- | --- |
-| `setFiles(files)` / `updateFile(path, content)` / `deleteFile(path)` / `getFile(path)` | VFS mutations (each triggers a rebuild) |
+| `setFiles(files)` / `updateFile(path, content)` / `batch(files)` / `deleteFile(path)` / `getFile(path)` | VFS mutations (each triggers a rebuild; `batch` applies several files with ONE build) |
 | `on('success' \| 'compileError' \| 'runtimeError' \| 'log', fn)` | Events; `log` entries are `{ ts, level, domain, message, data }` |
 | `new AngularBrowserBuilder({ container, versions, main })` | `versions` overrides pin (defaults: Angular 17.3.12, rxjs 7.8.1, TS 5.4.5, sass 1.86.3) |
 
@@ -68,6 +68,11 @@ log panel).
 
 - Standalone components, `templateUrl`/`styleUrl(s)` (rewritten to inlined `require()` —
   Angular JIT would otherwise **fetch** the URL string), AsyncPipe, DI, HttpClient.
+- **Router**: auto-injected `MemoryLocationStrategy` + `APP_BASE_HREF: '/'` keep
+  navigation entirely in the sandbox — the host URL/history is never touched.
+  `provideRouter` apps just work; back/forward via `Location.back()`/`forward()`
+  (or links) drive the Router through the memory strategy's popstate listeners.
+  Browser back-button won't navigate (by design — it would manipulate the host history).
 - **Auto-injected VFS HttpInterceptor** — `HttpClient.get('assets/data.json')` resolves
   from the VFS (via `withInterceptorsFromDi()` + `HTTP_INTERCEPTORS`); misses fall
   through to the network. No manual wiring needed.
@@ -78,10 +83,9 @@ log panel).
 
 ## Known limits (see to-do.md)
 
-- No Router demo yet (`MemoryLocationStrategy` pending), no HTML/CSS fast refresh (V1
-  soft-reloads), global `styles.css` from angular.json unsupported, SCSS `@import`/`@use`
-  of VFS files pending, binaries must be `data:` URLs, sass installs a small
-  `globalThis.require` stub on the host.
+- No HTML/CSS fast refresh (V1 soft-reloads), global `styles.css` from angular.json
+  unsupported, SCSS `@import`/`@use` of VFS files pending, binaries must be `data:` URLs,
+  sass installs a small `globalThis.require` stub on the host.
 
 ## License
 

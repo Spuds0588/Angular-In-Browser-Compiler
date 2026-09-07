@@ -2,45 +2,91 @@
 export const appFiles = {
   'src/main.ts': `
 import { bootstrapApplication } from '@angular/platform-browser';
-import { AppComponent } from './app/app.component';
+import { provideRouter } from '@angular/router';
+import { AppComponent, routes } from './app/app.component';
 
-bootstrapApplication(AppComponent)
+bootstrapApplication(AppComponent, { providers: [provideRouter(routes)] })
   .then((ref) => { window.__NG_APP_REF__ = ref; })
   .catch((err) => console.error(err));
 `,
 
   'src/app/app.component.ts': `
 import { Component } from '@angular/core';
-import { CommonModule } from '@angular/common';
-import { DataService } from './data.service';
+import { RouterLink, RouterLinkActive, RouterOutlet } from '@angular/router';
+import { HomeComponent } from './home.component';
+import { AboutComponent } from './about.component';
+
+export const routes = [
+  { path: '', component: HomeComponent },
+  { path: 'about', component: AboutComponent },
+];
 
 @Component({
   selector: 'app-root',
   standalone: true,
-  imports: [CommonModule],
+  imports: [RouterLink, RouterLinkActive, RouterOutlet],
   templateUrl: './app.component.html',
   styleUrls: ['./app.component.css'],
 })
-export class AppComponent {
-  title = 'ng-builder-demo';
+export class AppComponent { title = 'ng-builder-demo'; }
+`,
+
+  'src/app/app.component.html': `
+<h1>{{ title }}</h1>
+<nav>
+  <a routerLink="/" routerLinkActive="active">Home</a>
+  <a routerLink="/about" routerLinkActive="active">About</a>
+</nav>
+<router-outlet></router-outlet>
+`,
+
+  'src/app/app.component.css': `
+nav { background: #f1f5f9; padding: 8px 12px; border-bottom: 1px solid #e2e8f0; display: flex; gap: 12px; }
+nav a { color: #334155; text-decoration: none; font-weight: 600; }
+nav a.active { color: #c0392b; border-bottom: 2px solid #c0392b; }
+h1 { color: #c0392b; font-family: sans-serif; }
+`,
+
+  'src/app/home.component.ts': `
+import { Component } from '@angular/core';
+import { CommonModule } from '@angular/common';
+import { DataService } from './data.service';
+
+@Component({
+  selector: 'app-home',
+  standalone: true,
+  imports: [CommonModule],
+  templateUrl: './home.component.html',
+  styleUrls: ['./home.component.css'],
+})
+export class HomeComponent {
   count = 0;
   constructor(public data: DataService) {}
   inc() { this.count++; }
 }
 `,
 
-  'src/app/app.component.html': `
-<h1>{{ title }}</h1>
+  'src/app/home.component.html': `
 <p>Count: <strong>{{ count }}</strong> <button (click)="inc()">+1</button></p>
 <p>Data: <em>{{ (data.message$ | async)?.message }}</em></p>
 <img src="assets/logo.png" alt="logo" width="48">
 <p class="hint">Edit the files on the left and hit Apply.</p>
 `,
 
-  'src/app/app.component.css': `
-h1 { color: #c0392b; font-family: sans-serif; }
-.hint { color: #888; font-size: 12px; }
+  'src/app/home.component.css': `
 button { padding: 2px 10px; cursor: pointer; }
+.hint { color: #888; font-size: 12px; }
+`,
+
+  'src/app/about.component.ts': `
+import { Component } from '@angular/core';
+
+@Component({
+  selector: 'app-about',
+  standalone: true,
+  template: '<h2>About</h2><p>This page is served by the Router inside the sandbox — the host URL never changes (MemoryLocationStrategy).</p>',
+})
+export class AboutComponent {}
 `,
 
   'src/app/data.service.ts': `
