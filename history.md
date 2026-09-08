@@ -323,6 +323,15 @@ identically in production.
   so Home and About were BOTH `active`. Fixed with
   `[routerLinkActiveOptions]="{ exact: true }"` on the Home link.
 
+### Deploy
+Pushed (57d20d7) → Pages auto-deployed → headless-Chrome CDP check against the LIVE
+github.io site: boot, h1 = Material `$brand` (rgb(63,81,181) = indigo-500), hint/nav bg
+VFS tokens intact, About nav + exclusive active class (exact-match fix), host URL stays
+on github.io. The npm-package Sass importer behaves identically in production; first
+compile on the live origin ≈ 45 s, cached thereafter.
+
+---
+
 ### Open questions for next sessions
 - Does esm.sh rewrite the dynamic `import('@angular/compiler')` or did the eager framework
   import mask it? (Check by removing compiler from the always-imported set.)
