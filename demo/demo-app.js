@@ -26,7 +26,7 @@ export const routes = [
   standalone: true,
   imports: [RouterLink, RouterLinkActive, RouterOutlet],
   templateUrl: './app.component.html',
-  styleUrls: ['./app.component.css'],
+  styleUrls: ['./app.component.scss'],
 })
 export class AppComponent { title = 'ng-builder-demo'; }
 `,
@@ -40,11 +40,22 @@ export class AppComponent { title = 'ng-builder-demo'; }
 <router-outlet></router-outlet>
 `,
 
-  'src/app/app.component.css': `
-nav { background: #f1f5f9; padding: 8px 12px; border-bottom: 1px solid #e2e8f0; display: flex; gap: 12px; }
-nav a { color: #334155; text-decoration: none; font-weight: 600; }
-nav a.active { color: #c0392b; border-bottom: 2px solid #c0392b; }
-h1 { color: #c0392b; font-family: sans-serif; }
+  'src/app/_variables.scss': `
+// Shared design tokens — @use'd by app.component.scss and home.component.scss.
+$brand: #7c3aed;
+$accent: #c0392b;
+$nav-bg: #f1f5f9;
+$border: #e2e8f0;
+$text: #334155;
+$muted: #888;
+`,
+
+  'src/app/app.component.scss': `
+@use './variables';
+nav { background: variables.$nav-bg; padding: 8px 12px; border-bottom: 1px solid variables.$border; display: flex; gap: 12px; }
+nav a { color: variables.$text; text-decoration: none; font-weight: 600; }
+nav a.active { color: variables.$brand; border-bottom: 2px solid variables.$brand; }
+h1 { color: variables.$brand; font-family: sans-serif; }
 `,
 
   'src/app/home.component.ts': `
@@ -57,7 +68,7 @@ import { DataService } from './data.service';
   standalone: true,
   imports: [CommonModule],
   templateUrl: './home.component.html',
-  styleUrls: ['./home.component.css'],
+  styleUrls: ['./home.component.scss'],
 })
 export class HomeComponent {
   count = 0;
@@ -73,9 +84,10 @@ export class HomeComponent {
 <p class="hint">Edit the files on the left and hit Apply.</p>
 `,
 
-  'src/app/home.component.css': `
+  'src/app/home.component.scss': `
+@use './variables';
 button { padding: 2px 10px; cursor: pointer; }
-.hint { color: #888; font-size: 12px; }
+.hint { color: variables.$muted; font-size: 12px; }
 `,
 
   'src/app/about.component.ts': `

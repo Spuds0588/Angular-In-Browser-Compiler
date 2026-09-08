@@ -288,7 +288,7 @@ export class AngularBrowserBuilder {
         } else if (ext === 'css') {
           modules[path] = stringModule(this._rewriteCssAssets(src, assets));
         } else if (ext === 'scss') {
-          modules[path] = stringModule(this._rewriteCssAssets(await this._compileScss(src), assets));
+          modules[path] = stringModule(this._rewriteCssAssets(await this._compileScss(src, path), assets));
         } else if (ext === 'json') {
           modules[path] = stringModule(src);
           assets[path] = { content: src, type: 'application/json' };
@@ -378,7 +378,55 @@ export class AngularBrowserBuilder {
     return this._ts;
   }
 
-  async _compileScss(src) {
+  /** Resolve a sass @import/@use against the VFS. Returns the vfs: URL of the file,
+   *  or null to let sass fall through (https: etc.). Resolution order: partial first
+   *  (dart-sass convention: `name` -> `_name.scss`), then directory `_index.scss`. */
+  _sassImporter() {
+    const files = this.files;
+    const clean = (p) => {
+      const out = [];
+      for (const seg of p.split('/')) {
+        if (!seg || seg === '.') continue;
+        if (seg === '..') out.pop();
+        else out.push(seg);
+      }
+      return out.join('/');
+    };
+    const hit = (p) => (files.has(p) ? p : files.has('src/' + p) ? 'src/' + p : null);
+    return {
+      /* sass hands us the import string (with any ./ prefix already normalized away)
+         plus the containing file's URL; resolve it against that file's directory,
+         with a VFS-root fallback (bare-specifier convenience — no node_modules). */
+      canonicalize(url, { containingUrl } = {}) {
+        const dir = containingUrl ? clean(containingUrl.pathname).replace(/\/[^/]+$/, '') : '';
+        const bases = url.startsWith('/')
+          ? [clean(url)]
+          : containingUrl ? [clean(`${dir}/${url}`), clean(url)] : [clean(url)];
+        for (const base of [...new Set(bases)]) {
+          if (/\.(scss|sass|css)$/.test(base)) {
+            const p = hit(base);
+            if (p) return new URL('vfs:' + p);
+            continue;
+          }
+          const i = base.lastIndexOf('/');
+          const d = i > 0 ? base.slice(0, i) : '';
+          const name = base.slice(i + 1);
+          for (const c of [`${d}/${name}.scss`, `${d}/${name}.sass`, `${d}/_${name}.scss`, `${d}/_${name}.sass`, `${d}/${name}/_index.scss`, `${d}/${name}/index.scss`]) {
+            const p = hit(c);
+            if (p) return new URL('vfs:' + p);
+          }
+        }
+        return null;
+      },
+      load(canonicalUrl) {
+        const p = canonicalUrl.pathname.replace(/^\//, '');
+        if (!files.has(p)) return null;
+        return { contents: files.get(p), syntax: p.endsWith('.sass') ? 'indented' : 'scss' };
+      },
+    };
+  }
+
+  async _compileScss(src, path = '') {
     // esm.sh's sass shim calls require('url') internally; install a global stub once.
     // Must run before the module's first evaluation, so guard on _sass being unset.
     if (!this._sass && typeof require === 'undefined') {
@@ -390,7 +438,7 @@ export class AngularBrowserBuilder {
     }
     if (!this._sass) this._sass = import(`${ESM_SH}/sass@${this.versions.sass}`);
     const sass = await this._sass;
-    return (await sass.compileStringAsync(src)).css;
+    return (await sass.compileStringAsync(src, { url: new URL('vfs:' + path), importers: [this._sassImporter()] })).css;
   }
 
   /** Auto-inject provider shims into main.ts (source-level): VFS HttpInterceptor +

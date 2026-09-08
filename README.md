@@ -78,14 +78,18 @@ log panel).
   through to the network. No manual wiring needed.
 - **Assets**: text/data-URL assets become blob URLs; `assets/...` refs in templates and
   CSS are rewritten at compile time (lookup handles `assets/…` vs `src/assets/…`).
-- SCSS (lazy Dart Sass via esm.sh, `compileStringAsync`), CSS, JSON modules.
+- SCSS (lazy Dart Sass via esm.sh, `compileStringAsync`) with a custom VFS importer:
+  `@import`/`@use` of other VFS `.scss` files (partials like `_variables.scss`,
+  `_index.scss` dirs, `./` `../` and root-relative paths) just work. The demo shares
+  a `src/app/_variables.scss` between components.
 - Error boundaries: compile errors keep the last-good build on screen.
 
 ## Known limits (see to-do.md)
 
 - No HTML/CSS fast refresh (V1 soft-reloads), global `styles.css` from angular.json
-  unsupported, SCSS `@import`/`@use` of VFS files pending, binaries must be `data:` URLs,
-  sass installs a small `globalThis.require` stub on the host.
+  unsupported, binaries must be `data:` URLs, sass installs a small
+  `globalThis.require` stub on the host, a bare `@use "x"` prefers the importing
+  file's dir over the VFS root.
 
 ## License
 

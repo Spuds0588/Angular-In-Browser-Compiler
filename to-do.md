@@ -42,7 +42,12 @@ YAGNI, with a note on when to revisit.
 ## Phase 7: SCSS
 - [x] Lazy Dart Sass (`esm.sh/sass@1.86.3` default mode, `compileStringAsync`) on first `.scss`, with `globalThis.require` stub installed before first import (esm.sh shim calls `require('url')`)
 - [x] Verified in browser: `$brand` var compiles; computed style reflects it
-- [ ] Custom Sass importer for `@import` VFS paths — (deferred; `@import`/`@use` of other VFS `.scss` files unresolved)
+- [x] Custom Sass importer (`canonicalize`/`load` on a `vfs:` scheme) so `@import`/`@use`
+  resolves against VFS files: partial-first resolution (`_name.scss`), `_index.scss`
+  dirs, relative (`./`, `../`), and root-relative bare specifiers. Demo shares
+  `src/app/_variables.scss` between `app.component.scss` and `home.component.scss`.
+  Verified: both components' computed styles pull from `$brand`/`$nav-bg`/`$muted`;
+  missing imports surface as clean sass errors caught by the error boundary.
 
 ## Phase 8: State management & error boundaries
 - [x] Last-known-good preserved on compile error (iframe untouched; structured `compileError`; host checks TS `diagnostics` BEFORE sending — `transpileModule` emits broken output on syntax errors)
@@ -61,6 +66,7 @@ YAGNI, with a note on when to revisit.
 - `globalThis.require` stub pollutes host global (sass only) — iframe-local sass or dedicated build would remove it
 - ✅ Demo Apply/Fix now use `builder.batch(files)` — one build per apply (added in session 3)
 - Sandbox CSP needs `'unsafe-eval'` in script-src — documented trade-off in README
+- Sass importer ambiguity (accepted): a bare `@use "variables"` tries the importing file's dir first, then VFS root — a same-named file at both levels would resolve to the dir one
 
 ## V1 status
 - ✅ **Committed** (e2b006f): library + demo + agent/to-do/history docs. All Phase 1–5, 7, 8

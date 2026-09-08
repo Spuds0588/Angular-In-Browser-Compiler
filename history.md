@@ -239,12 +239,48 @@ fix (recovery) → SCSS `$brand: #7c3aed` (h1 + active link colors verified, rou
 
 ---
 
+## 2026-09-08 — Session 4: custom Sass importer (VFS @import/@use) + shared _variables.scss
+
+### What landed (all verified live in Chromium)
+- **`_sassImporter()`** in the builder: a `canonicalize`/`load` importer over a `vfs:`
+  scheme, wired into `compileStringAsync(src, { url, importers })` (the `url` option is
+  required — it gives sass the containing file for relative resolution).
+- **Resolution order** (dart-sass partial convention): `name.scss` → `name.sass` →
+  `_name.scss` → `_name.sass` → `name/_index.scss` → `name/index.scss`; `@use "variables"`
+  resolves against the importing file's dir FIRST, then VFS root (bare-specifier
+  convenience, no node_modules). Root-relative (`@use "src/app/_variables.scss"`) and
+  `../` escapes work too. Missing imports → clean sass error → error boundary keeps
+  last-good.
+- **Demo**: new `src/app/_variables.scss` (`$brand: #7c3aed`, `$nav-bg`, `$text`, `$muted`,
+  …); `app.component.scss` + `home.component.scss` both `@use './variables'` with
+  `variables.$x` namespacing. Verified computed styles: h1 + active link = $brand,
+  nav bg = $nav-bg, hint = $muted.
+
+### The importer API contract (do not repeat)
+- **sass strips `./` before calling the importer** — `@use "./variables"` arrives at
+  `canonicalize` as `"variables"`, and `@use "./sub/variables"` as `"sub/variables"`.
+  The containing file comes via the `context.containingUrl` (the `url` option you passed
+  to compileStringAsync). This is IDENTICAL for opaque (`vfs:src/...`) and hierarchical
+  (`vfs:///src/...`) schemes — don't bother switching schemes; resolve the string against
+  `containingUrl` yourself.
+- Path-normalize the joined string (drop `.`/`..` segments) BEFORE matching VFS keys —
+  `src/app/./variables` silently misses every key. First bug found this way.
+- The importer's `load()` returns `{ contents, syntax }`; syntax `'indented'` for `.sass`.
+  `canonicalize` returning `null` = "let sass fall through" (https: etc.).
+
+### Full sweep after the change (all ✓)
+bootstrap → SCSS vars on h1/nav/hint → importer edge cases (../ escape, bare root,
+missing → clean error) → +1 → About nav + host URL untouched → HMR edit (title change,
+count reset, interceptor intact) → break (compileError, last-good kept) → fix (recovery,
+SCSS intact).
+
+---
+
 ### Open questions for next sessions
 - Does esm.sh rewrite the dynamic `import('@angular/compiler')` or did the eager framework
   import mask it? (Check by removing compiler from the always-imported set.)
-- Router: `MemoryLocationStrategy` + `APP_BASE_HREF` + `provideRouter` — needs a Router
-  demo before claiming Phase 6.
-- SCSS `@import`/`@use` of VFS files: custom sass importer pending.
 - `globalThis.require` stub pollutes the host global — acceptable for V1; a dedicated
   esm.sh build or an iframe-local sass worker would remove it.
+- Next PRD milestones: HTML/CSS fast refresh (state-preserving edits), then V2 LLM bridge
+  (`window.__NG_BUILDER_MCP__`).
 - The demo Apply button double-builds (two `updateFile` calls) — consider `batch(files)`.
