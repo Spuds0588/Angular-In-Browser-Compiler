@@ -274,6 +274,12 @@ missing → clean error) → +1 → About nav + host URL untouched → HMR edit 
 count reset, interceptor intact) → break (compileError, last-good kept) → fix (recovery,
 SCSS intact).
 
+### Deploy
+Pushed (a2d9769) → Pages workflow auto-deployed → headless-Chrome CDP check against the
+LIVE github.io site: boot, h1=`$brand` (rgb(124,58,237)), hint=`$muted`, nav bg=`$nav-bg`,
+Home/About nav + active class, host URL stays on github.io. The importer behaves
+identically in production.
+
 ---
 
 ### Open questions for next sessions
