@@ -36,6 +36,7 @@ const DEFAULT_VERSIONS = {
   '@angular/forms': '17.3.12', '@angular/router': '17.3.12', '@angular/platform-browser': '17.3.12',
   rxjs: '7.8.1', tslib: '2.6.3',
   'zone.js': '0.14.10', 'reflect-metadata': '0.2.2', typescript: '5.4.5', sass: '1.86.3',
+  '@angular/material': '17.3.10', /* Sass-only dep: resolved by the sass importer (no JS fetched) */
 };
 
 const MIME = {
@@ -378,11 +379,15 @@ export class AngularBrowserBuilder {
     return this._ts;
   }
 
-  /** Resolve a sass @import/@use against the VFS. Returns the vfs: URL of the file,
-   *  or null to let sass fall through (https: etc.). Resolution order: partial first
-   *  (dart-sass convention: `name` -> `_name.scss`), then directory `_index.scss`. */
+  /** Resolve a sass @import/@use. VFS files use a `vfs:` scheme; bare npm package
+   *  specifiers (@use '@angular/material' as mat) resolve through the package's
+   *  exports map (`sass` condition, then `style`/`default`, then classic fields) to
+   *  files fetched from jsdelivr under an `npm:` scheme. Relative imports inside a
+   *  package file resolve against it, staying within the package root. */
   _sassImporter() {
     const files = this.files;
+    const versions = this.versions;
+    const cache = this._sassCache || (this._sassCache = new Map()); /* npm fetches, per session */
     const clean = (p) => {
       const out = [];
       for (const seg of p.split('/')) {
@@ -393,32 +398,175 @@ export class AngularBrowserBuilder {
       return out.join('/');
     };
     const hit = (p) => (files.has(p) ? p : files.has('src/' + p) ? 'src/' + p : null);
+    /* jsdelivr fetch, cached per builder session, 404/network-tolerant (null). */
+    const fetchNpm = (path) => {
+      if (cache.has(path)) return cache.get(path);
+      const p = fetch(`${CDN}/${path}`).then((r) => (r.ok ? r.text() : null)).catch(() => null);
+      cache.set(path, p);
+      return p;
+    };
+    /* Full file tree of a package (ONE data.jsdelivr.com request), so candidate
+       probing resolves locally instead of hundreds of 404 round-trips. */
+    const pkgTree = async (pkgAtVer) => {
+      const key = 'tree:' + pkgAtVer;
+      if (cache.has(key)) return cache.get(key);
+      const collect = (files, prefix) => {
+        const set = new Set();
+        for (const f of files) {
+          const p = prefix ? prefix + '/' + f.name : f.name;
+          set.add(f.type === 'file' ? p : p + '/');
+          if (f.files) for (const q of collect(f.files, p)) set.add(q);
+        }
+        return set;
+      };
+      const p = fetch(`https://data.jsdelivr.com/v1/packages/npm/${pkgAtVer}`)
+        .then((r) => (r.ok ? r.json() : null))
+        .then((t) => (t && t.files ? collect(t.files, '') : null))
+        .catch(() => null);
+      cache.set(key, p);
+      /* warm: prefetch every .scss/.sass in parallel (6 workers) so dart-sass's
+         sequential load() calls all hit the cache instead of waiting on the CDN. */
+      p.then((set) => {
+        if (!set) return;
+        const files = [...set].filter((f) => /\.s[ac]ss$/.test(f));
+        let i = 0;
+        const work = async () => { while (i < files.length) { const f = files[i++]; try { await fetchNpm(`${pkgAtVer}/${f}`); } catch { /* null-tolerant */ } } };
+        for (let w = 0; w < 6; w++) work();
+      }).catch(() => {});
+      return p;
+    };
+    /* dart-sass partial convention against a jsdelivr path (no ext -> partials). */
+    const probeNpm = async (base) => {
+      const exact = /\.(scss|sass|css)$/i.test(base);
+      const root = (base.match(/^(.*@[^/]+)\//) || [])[1];
+      const tree = root ? await pkgTree(root) : null;
+      const cands = exact ? [base]
+        : (() => {
+            const i = base.lastIndexOf('/');
+            const d = i > 0 ? base.slice(0, i) : '';
+            const name = base.slice(i + 1);
+            return (d
+              ? [`${d}/${name}.scss`, `${d}/${name}.sass`, `${d}/_${name}.scss`, `${d}/_${name}.sass`]
+              : [`${name}.scss`, `${name}.sass`, `_${name}.scss`, `_${name}.sass`])
+              .concat(d
+                ? [`${d}/${name}/_index.scss`, `${d}/${name}/index.scss`, `${d}/${name}/index.sass`]
+                : [`${name}/_index.scss`, `${name}/index.scss`, `${name}/index.sass`]);
+          })();
+      for (const c of cands) {
+        if (tree) { if (tree.has(root ? c.slice(root.length + 1) : c)) return c; }
+        else if ((await fetchNpm(c)) != null) return c;
+      }
+      return null;
+    };
+    /* dependencies map of a package (deps + peerDeps), cached by pkg@ver. */
+    const pkgDeps = async (pkgAtVer) => {
+      const key = 'deps:' + pkgAtVer;
+      if (cache.has(key)) return cache.get(key);
+      const p = fetchNpm(`${pkgAtVer}/package.json`).then((json) => {
+        if (json == null) return null;
+        try {
+          const meta = JSON.parse(json);
+          return { ...meta.dependencies, ...meta.peerDependencies };
+        } catch { return null; }
+      });
+      cache.set(key, p);
+      return p;
+    };
+    /* Bare specifier -> package entry file via its package.json exports map.
+       Version: the pinned `versions` map, or — when the @use comes from inside
+       another package — that package's declared dependency (MDC transitive case). */
+    const npmEntry = async (spec, containingUrl) => {
+      const m = spec.match(/^(@[^/]+\/[^/]+|[^/]+)(?:\/(.*))?$/);
+      if (!m) return null;
+      const pkg = m[1], sub = m[2] || '';
+      let ver = versions[pkg];
+      if (!ver && containingUrl) {
+        const root = containingUrl.pathname.match(/^(.*@[^/]+)\//);
+        if (root) {
+          const deps = await pkgDeps(root[1]);
+          ver = deps && deps[pkg];
+        }
+      }
+      if (!ver) return null; /* unknown package/version — fall through */
+      const json = await fetchNpm(`${pkg}@${ver}/package.json`);
+      if (json == null) return null;
+      let meta;
+      try { meta = JSON.parse(json); } catch { return null; }
+      let entry = null;
+      const ex = meta.exports;
+      const key = sub ? './' + sub : '.';
+      if (ex && typeof ex === 'object') {
+        const v = ex[key];
+        if (typeof v === 'string') entry = v;
+        else if (v && typeof v === 'object') {
+          for (const c of ['sass', 'style', 'default']) if (typeof v[c] === 'string') { entry = v[c]; break; }
+        }
+      }
+      if (!entry) entry = sub || meta.sass || meta.style || '_index.scss';
+      const base = clean(entry.replace(/^\.\//, ''));
+      const found = await probeNpm(`${pkg}@${ver}/${base}`);
+      return found ? new URL('npm:' + found) : null;
+    };
+    /* Relative import inside a package file: resolve vs. its dir, clamped to pkg root. */
+    const npmRel = async (url, containingUrl) => {
+      const pathname = containingUrl.pathname;
+      const m = pathname.match(/^(.*@[^/]+)\//);
+      if (!m) return null;
+      const root = m[1];
+      const joined = url.startsWith('/')
+        ? clean(`${root}/${url}`)
+        : clean(`${pathname.slice(0, pathname.lastIndexOf('/'))}/${url}`);
+      const base = joined.startsWith(root) ? joined : `${root}/${clean(url)}`;
+      const found = await probeNpm(base);
+      return found ? new URL('npm:' + found) : null;
+    };
+    /* VFS resolution (unchanged behavior; bare specifiers now try npm first). */
+    const vfs = (url, containingUrl) => {
+      const dir = containingUrl ? clean(containingUrl.pathname).replace(/\/[^/]+$/, '') : '';
+      const bases = url.startsWith('/') || !containingUrl
+        ? [clean(url)]
+        : [clean(`${dir}/${url}`), clean(url)];
+      for (const base of [...new Set(bases)]) {
+        if (/\.(scss|sass|css)$/.test(base)) {
+          const p = hit(base);
+          if (p) return new URL('vfs:' + p);
+          continue;
+        }
+        const i = base.lastIndexOf('/');
+        const d = i > 0 ? base.slice(0, i) : '';
+        const name = base.slice(i + 1);
+        for (const c of [`${d}/${name}.scss`, `${d}/${name}.sass`, `${d}/_${name}.scss`, `${d}/_${name}.sass`, `${d}/${name}/_index.scss`, `${d}/${name}/index.scss`]) {
+          const p = hit(c);
+          if (p) return new URL('vfs:' + p);
+        }
+      }
+      return null;
+    };
+    const isNpmSpec = (s) => /^(@[^/]+\/)?[a-z0-9][a-z0-9._-]*(\/.*)?$/i.test(s)
+      && !s.startsWith('.') && !s.startsWith('/') && !s.includes(':');
     return {
       /* sass hands us the import string (with any ./ prefix already normalized away)
-         plus the containing file's URL; resolve it against that file's directory,
-         with a VFS-root fallback (bare-specifier convenience — no node_modules). */
+         plus the containing file's URL. npm bare specifiers resolve via the exports
+         map (falling back to VFS root-relative); VFS paths as before. */
       canonicalize(url, { containingUrl } = {}) {
-        const dir = containingUrl ? clean(containingUrl.pathname).replace(/\/[^/]+$/, '') : '';
-        const bases = url.startsWith('/')
-          ? [clean(url)]
-          : containingUrl ? [clean(`${dir}/${url}`), clean(url)] : [clean(url)];
-        for (const base of [...new Set(bases)]) {
-          if (/\.(scss|sass|css)$/.test(base)) {
-            const p = hit(base);
-            if (p) return new URL('vfs:' + p);
-            continue;
-          }
-          const i = base.lastIndexOf('/');
-          const d = i > 0 ? base.slice(0, i) : '';
-          const name = base.slice(i + 1);
-          for (const c of [`${d}/${name}.scss`, `${d}/${name}.sass`, `${d}/_${name}.scss`, `${d}/_${name}.sass`, `${d}/${name}/_index.scss`, `${d}/${name}/index.scss`]) {
-            const p = hit(c);
-            if (p) return new URL('vfs:' + p);
-          }
+        if (containingUrl && containingUrl.protocol === 'npm:') {
+          /* scoped specifiers are always packages; unscoped ones may be package
+             paths (sass strips the `./` of `@forward './core/...'`), so try
+             relative first, then treat as a package (e.g. @material/*). */
+          if (url.startsWith('@')) return npmEntry(url, containingUrl);
+          if (isNpmSpec(url)) return npmRel(url, containingUrl).then((u) => u || npmEntry(url, containingUrl));
+          return npmRel(url, containingUrl);
         }
-        return null;
+        if (isNpmSpec(url)) return npmEntry(url).then((u) => u || vfs(url, containingUrl));
+        return vfs(url, containingUrl);
       },
       load(canonicalUrl) {
+        if (canonicalUrl.protocol === 'npm:') {
+          return fetchNpm(canonicalUrl.pathname).then((t) => (t == null ? null : {
+            contents: t,
+            syntax: canonicalUrl.pathname.endsWith('.sass') ? 'indented' : 'scss',
+          }));
+        }
         const p = canonicalUrl.pathname.replace(/^\//, '');
         if (!files.has(p)) return null;
         return { contents: files.get(p), syntax: p.endsWith('.sass') ? 'indented' : 'scss' };

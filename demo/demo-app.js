@@ -34,7 +34,7 @@ export class AppComponent { title = 'ng-builder-demo'; }
   'src/app/app.component.html': `
 <h1>{{ title }}</h1>
 <nav>
-  <a routerLink="/" routerLinkActive="active">Home</a>
+  <a routerLink="/" routerLinkActive="active" [routerLinkActiveOptions]="{ exact: true }">Home</a>
   <a routerLink="/about" routerLinkActive="active">About</a>
 </nav>
 <router-outlet></router-outlet>
@@ -42,7 +42,10 @@ export class AppComponent { title = 'ng-builder-demo'; }
 
   'src/app/_variables.scss': `
 // Shared design tokens — @use'd by app.component.scss and home.component.scss.
-$brand: #7c3aed;
+// $brand is derived from the npm package @angular/material (resolved through the
+// esm.sh-era sass importer's jsdelivr path — no node_modules, no JS bundle).
+@use '@angular/material' as mat;
+$brand: mat.get-color-from-palette(mat.$indigo-palette, 500); // #3f51b5
 $accent: #c0392b;
 $nav-bg: #f1f5f9;
 $border: #e2e8f0;

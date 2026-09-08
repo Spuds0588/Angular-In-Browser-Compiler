@@ -282,6 +282,47 @@ identically in production.
 
 ---
 
+## 2026-09-08 — Session 5: npm-package Sass resolution (@use '@angular/material')
+
+### What landed (all verified in Chromium)
+- **`npm:` scheme in `_sassImporter()`**: bare specifiers (`@use '@angular/material' as mat`)
+  resolve through the package's `package.json` `exports` map — `sass` condition first
+  (material: `.` → `./_index.scss`), then `style`/`default` conditions, then classic
+  `sass`/`style` fields, then an `_index.scss` probe. Subpaths (`@material/x/sub`)
+  probe directly as files in the package root. Version comes from the pinned `versions`
+  map; when the `@use` is INSIDE another package, from that package's `dependencies`
+  (MDC transitive case).
+- **Demo**: `_variables.scss` now does `@use '@angular/material' as mat;` and derives
+  `$brand: mat.get-color-from-palette(mat.$indigo-palette, 500)` → computed h1 color
+  `rgb(63, 81, 181)` = `#3f51b5`. Full sweep green: bootstrap, +1, About/Home nav +
+  exclusive active classes, host URL untouched, HMR edit (title changed, count reset,
+  material color recompiled from cache).
+
+### Gotchas that cost time (do not repeat)
+- **sass strips `./` from EVERY scheme** — inside a package file, `@forward './core/theming/theming'`
+  arrives as `core/theming/theming`, indistinguishable from a package name. Rule: inside
+  `npm:` context, scoped specifiers (`@scope/pkg`) are ALWAYS packages; unscoped ones try
+  RELATIVE first, then package. Failing to do this sent `core/theming/theming` to
+  package resolution and broke the entry forward.
+- **Partial probing must be partial-FIRST** (`name.scss` → `_name.scss` → `name/_index.scss`),
+  exactly like the VFS branch — `@forward './core/theming/theming'` lives at
+  `core/theming/_theming.scss`, and treating `theming` as a directory misses it.
+- **Transitive MDC versions**: material's scss `@use`s `@material/*` at
+  `15.0.0-canary.7f224ddd4.0` (canary!). MDC packages have NO `exports` map and NO
+  `sass` field — the classic `_index.scss` fallback + subpath probing is what makes
+  `@material/feature-targeting/feature-targeting` resolve. Version must come from the
+  CONSUMING package's package.json dependencies, not the `versions` pin map.
+- **jsdelivr file tree** (`data.jsdelivr.com/v1/packages/npm/<pkg@ver>`) returns paths
+  RELATIVE to the package root (no `pkg@ver/` prefix) — strip the prefix before
+  `Set.has()`. One request per package; use it to (a) resolve all candidate probes
+  locally (no 404 round-trips) and (b) prefetch every `.scss`/`.sass` in parallel
+  (6 workers) so dart-sass's sequential `load()` calls hit the cache. First compile of
+  the full material graph ≈ 35 s (warm), near-instant thereafter (HTTP + JS caches).
+- **CSP**: `connect-src` needs `https://data.jsdelivr.com` added (demo/index.html).
+- **Pre-existing demo bug found + fixed**: `routerLink="/"` prefix-matches EVERY route,
+  so Home and About were BOTH `active`. Fixed with
+  `[routerLinkActiveOptions]="{ exact: true }"` on the Home link.
+
 ### Open questions for next sessions
 - Does esm.sh rewrite the dynamic `import('@angular/compiler')` or did the eager framework
   import mask it? (Check by removing compiler from the always-imported set.)
@@ -289,4 +330,6 @@ identically in production.
   esm.sh build or an iframe-local sass worker would remove it.
 - Next PRD milestones: HTML/CSS fast refresh (state-preserving edits), then V2 LLM bridge
   (`window.__NG_BUILDER_MCP__`).
-- The demo Apply button double-builds (two `updateFile` calls) — consider `batch(files)`.
+- Sass npm resolution is eager for the full graph of `@use '@angular/material'` (every
+  component theme forwards + MDC). A targeted `mat.define-theme` (M3) demo instead of
+  the legacy palette API would exercise a smaller subgraph.

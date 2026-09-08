@@ -78,10 +78,15 @@ log panel).
   through to the network. No manual wiring needed.
 - **Assets**: text/data-URL assets become blob URLs; `assets/...` refs in templates and
   CSS are rewritten at compile time (lookup handles `assets/…` vs `src/assets/…`).
-- SCSS (lazy Dart Sass via esm.sh, `compileStringAsync`) with a custom VFS importer:
+- SCSS (lazy Dart Sass via esm.sh, `compileStringAsync`) with a custom importer:
   `@import`/`@use` of other VFS `.scss` files (partials like `_variables.scss`,
-  `_index.scss` dirs, `./` `../` and root-relative paths) just work. The demo shares
-  a `src/app/_variables.scss` between components.
+  `_index.scss` dirs, `./` `../` and root-relative paths) just work, **and** bare npm
+  packages resolve through their `exports` map (`sass` condition) to files fetched
+  from jsdelivr — e.g. `@use '@angular/material' as mat;` then
+  `mat.get-color-from-palette(mat.$indigo-palette, 500)` works, including the
+  transitive MDC `@material/*` packages (versions come from the consuming package's
+  dependencies; pinned package versions live in the builder's `versions` map). The
+  demo shares a `src/app/_variables.scss` whose `$brand` is Material-derived.
 - Error boundaries: compile errors keep the last-good build on screen.
 
 ## Known limits (see to-do.md)

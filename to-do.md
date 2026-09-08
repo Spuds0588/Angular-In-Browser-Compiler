@@ -48,6 +48,14 @@ YAGNI, with a note on when to revisit.
   `src/app/_variables.scss` between `app.component.scss` and `home.component.scss`.
   Verified: both components' computed styles pull from `$brand`/`$nav-bg`/`$muted`;
   missing imports surface as clean sass errors caught by the error boundary.
+- [x] npm-package Sass resolution (`npm:` scheme): bare specifiers like
+  `@use '@angular/material' as mat` resolve through the package's `exports` map
+  (`sass` condition → `style`/`default` → classic `sass`/`style` fields → `_index.scss`
+  probe). Transitive packages (MDC `@material/*`) get their version from the
+  CONSUMING package's `package.json` dependencies. A cached `data.jsdelivr.com` file
+  tree per package resolves candidate probes locally and prefetches all `.scss` in
+  parallel. Demo: `$brand` = `mat.get-color-from-palette(mat.$indigo-palette, 500)`
+  → `#3f51b5` verified via computed style.
 
 ## Phase 8: State management & error boundaries
 - [x] Last-known-good preserved on compile error (iframe untouched; structured `compileError`; host checks TS `diagnostics` BEFORE sending — `transpileModule` emits broken output on syntax errors)
