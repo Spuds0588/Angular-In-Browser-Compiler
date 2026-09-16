@@ -14,14 +14,21 @@ $('html-editor').value = GOOD_HTML;
 const builder = new AngularBrowserBuilder({ container: $('frame-host') });
 window.__BUILDER__ = builder;
 
-builder.on('log', (entry) => {
+/* The V2 LLM bridge the demo drives below. */
+const mcp = window.__NG_BUILDER_MCP__;
+
+const appendLog = (text, cls = '') => {
   const li = document.createElement('li');
-  li.className = entry.level;
-  const time = new Date(entry.ts).toISOString().slice(11, 19);
-  li.textContent = `[${time}] [AngularBuilder::${entry.domain}] ${entry.message}` +
-    (entry.data ? ' ' + JSON.stringify(entry.data) : '');
+  li.className = cls;
+  li.textContent = text;
   logEl.prepend(li);
   while (logEl.children.length > 200) logEl.lastChild.remove();
+};
+
+builder.on('log', (entry) => {
+  const time = new Date(entry.ts).toISOString().slice(11, 19);
+  appendLog(`[${time}] [AngularBuilder::${entry.domain}] ${entry.message}` +
+    (entry.data ? ' ' + JSON.stringify(entry.data) : ''), entry.level);
 });
 
 builder.on('success', () => { statusEl.textContent = 'app running'; statusEl.className = 'ok'; });
@@ -44,6 +51,25 @@ $('btn-recolor').addEventListener('click', () => {
   alt = !alt;
   builder.updateFile('src/app/_variables.scss',
     GOOD_SCSS.replace('mat.$indigo-palette', alt ? 'mat.$teal-palette' : 'mat.$indigo-palette'));
+});
+
+/* V2 LLM bridge: exactly what an agent driving browser-skills does — read the VFS, patch
+   a file, wait for the build to settle, then read the structured logs and the sandbox DOM.
+   No editor, no button state, no host UI involved. */
+$('btn-agent').addEventListener('click', async () => {
+  const vfs = mcp.readVFS();
+  const tokens = vfs['src/app/_variables.scss'];
+  const toTeal = tokens.includes('$indigo-palette');
+  const t0 = performance.now();
+  const idle = await mcp.patchFiles({
+    'src/app/_variables.scss': tokens.replace(toTeal ? '$indigo-palette' : '$teal-palette',
+      toTeal ? '$teal-palette' : '$indigo-palette'),
+  });
+  const tags = [];
+  (function collect(node) { tags.push(node.tag); (node.children || []).forEach(collect); })(mcp.inspectDOM('app-home').root);
+  appendLog(`[MCP] patchFiles -> ${idle.status} in ${Math.round(performance.now() - t0)} ms` +
+    ` | readVFS ${Object.keys(vfs).length} files | getStructuredLogs ${mcp.getStructuredLogs().length}` +
+    ` | inspectDOM ${tags.join(' > ')}`, 'mcp');
 });
 
 $('btn-break').addEventListener('click', () => {

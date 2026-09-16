@@ -18,6 +18,8 @@ Feed it a virtual file system (TypeScript + HTML + CSS/SCSS + JSON + assets) and
    (re-transpile + re-bootstrap, state resets).
 5. **Guards errors**: TS `diagnostics` are checked before anything reaches the sandbox
    (`compileError`, last-good build kept); runtime errors stream back as `runtimeError`.
+6. **Hands the wheel to agents** (V2): `window.__NG_BUILDER_MCP__` reads the VFS, patches
+   files, awaits the triggered build, reads the structured logs and inspects the DOM.
 
 ## CSP contract (read before using)
 
@@ -62,7 +64,7 @@ structured log panel).
 
 ```bash
 npm run serve          # static server for the repo root → http://127.0.0.1:8137/demo/index.html
-npm test               # headless Chromium over CDP: 33 end-to-end checks, exit code 0/1
+npm test               # headless Chromium over CDP: 44 end-to-end checks, exit code 0/1
 npm run test:headed    # same, with a visible browser
 npm run lint           # node --check over src/, demo/, scripts/, test/
 ```
@@ -84,7 +86,25 @@ WebSocket). On older Node: `npm i` to pick up the test-only `ws` devDependency.
 | --- | --- |
 | `setFiles(files)` / `updateFile(path, content)` / `batch(files)` / `deleteFile(path)` / `getFile(path)` | VFS mutations (each triggers a rebuild; `batch` applies several files with ONE build) |
 | `on('success' \| 'compileError' \| 'runtimeError' \| 'log', fn)` | Events; `log` entries are `{ ts, level, domain, message, data }` |
-| `new AngularBrowserBuilder({ container, versions, main })` | `versions` overrides pin (defaults: Angular 17.3.12, rxjs 7.8.1, TS 5.4.5, sass 1.86.3) |
+| `new AngularBrowserBuilder({ container, versions, main, mcp })` | `versions` overrides pin (defaults: Angular 17.3.12, rxjs 7.8.1, TS 5.4.5, sass 1.86.3); `mcp: false` skips the V2 `window.__NG_BUILDER_MCP__` global |
+| `whenIdle(timeoutMs?)` | Promise settling when the next build finishes (`{ status: 'ok' \| 'error' \| 'timeout' }`) |
+
+## Agent / LLM bridge (V2)
+
+Every builder instance exposes the PRD's WebMCP surface on the host window as
+`window.__NG_BUILDER_MCP__` (opt out with `new AngularBrowserBuilder({ mcp: false })`):
+
+| Method | Purpose |
+| --- | --- |
+| `readVFS()` | `{ 'src/main.ts': '…' }` — the whole virtual file system |
+| `patchFiles(files)` | Applies edits like `batch()` (one rebuild, not N) **and returns a promise** that settles when the build it triggered finishes |
+| `getStructuredLogs()` | The `{ ts, level, domain, message, data }` entries of the **latest compilation cycle** (not a stale buffer from an earlier build) |
+| `inspectDOM(selector?, maxDepth?)` | JSON tree of the sandbox DOM — `{ tag, attrs, text, children }`, `script`/`style`/`link` filtered, depth-capped and node-budgeted |
+| `whenIdle(timeoutMs?)` | `{ status: 'ok' \| 'error' \| 'timeout', message? }` once the next build settles, so an agent never has to poll |
+
+`builder.whenIdle()` is available directly on the instance too. An agent can therefore drive a
+page with no host UI at all: read the VFS, patch files, await the build, inspect the DOM and
+read the compile logs. `demo/` shows the whole loop behind one **Agent (MCP)** button.
 
 ## Feature support (V1)
 

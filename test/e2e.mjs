@@ -168,6 +168,49 @@ const PAGE_SCRIPT = `(async () => {
   out.fixStatus = status();
   out.h1AfterFix = cs('h1', 'color');
 
+  /* --- V2 LLM bridge: window.__NG_BUILDER_MCP__ (PRD Phase 9) --- */
+  const mcp = window.__NG_BUILDER_MCP__;
+  out.mcpExists = !!mcp;
+  if (mcp) {
+    click('app-home button'); click('app-home button');
+    await sleep(100);
+    out.mcpCountBefore = count();
+    const vfs = mcp.readVFS();
+    out.mcpVfsFiles = Object.keys(vfs).length;
+    out.mcpVfsMain = typeof vfs['src/main.ts'] === 'string';
+    const dom = mcp.inspectDOM('app-home');
+    const tags = [];
+    if (dom) (function collect(n) { tags.push(n.tag); (n.children || []).forEach(collect); })(dom.root);
+    out.mcpDomTags = tags;
+    const idle = await mcp.patchFiles({
+      'src/app/_variables.scss': vfs['src/app/_variables.scss'].replace('$indigo-palette', '$teal-palette'),
+    });
+    out.mcpIdle = idle && idle.status;
+    out.mcpH1 = cs('h1', 'color');
+    out.mcpCountAfter = count();
+    const entries = mcp.getStructuredLogs();
+    out.mcpLogCount = entries.length;
+    out.mcpLogFields = entries.length ? Object.keys(entries[0]).sort().join(',') : null;
+    out.mcpLogDomains = entries.length ? [...new Set(entries.map((e) => e.domain))] : [];
+    out.mcpTimeout = (await mcp.whenIdle(1)).status;   // nothing in flight -> the guard fires
+    out.mcpStyleDomains = out.mcpLogDomains;
+
+    /* A TS edit opens a new cycle — the logs must follow it, not stay on the style patch. */
+    const idle2 = await mcp.patchFiles({
+      'src/app/home.component.ts': vfs['src/app/home.component.ts'] + String.fromCharCode(10) + '// mcp cycle probe' + String.fromCharCode(10),
+    });
+    out.mcpSecondIdle = idle2.status;
+    const entries2 = mcp.getStructuredLogs();
+    out.mcpTsLogCount = entries2.length;
+    out.mcpTsDomains = [...new Set(entries2.map((e) => e.domain))];
+
+    /* The demo's own MCP button must drive the same bridge through the UI. */
+    document.getElementById('btn-agent').click();
+    await waitFor(() => document.querySelector('#logs li.mcp'));
+    out.agentLine = (document.querySelector('#logs li.mcp') || {}).textContent || null;
+    out.agentLineCount = count();
+  }
+
   out.consoleErrs = window.__CONSOLE_ERRS__ || [];
   out.logsTail = logs(4);
   return out;
@@ -326,6 +369,31 @@ if (out.booted) {
   check('error boundary: previous app still rendered while broken', out.renderedWhileBroken, out.renderedWhileBroken);
   check('recovery: fixing the file restores the app', out.recovered && out.fixStatus === 'app running', out.fixStatus);
   eq('recovery: styles intact', out.h1AfterFix, INDIGO);
+
+  check('mcp: window.__NG_BUILDER_MCP__ is exposed', out.mcpExists === true, out.mcpExists);
+  if (out.mcpExists) {
+    check('mcp: readVFS returns the whole VFS', out.mcpVfsFiles >= 12 && out.mcpVfsMain === true,
+      `${out.mcpVfsFiles} files, main.ts present: ${out.mcpVfsMain}`);
+    check('mcp: inspectDOM returns the sandbox tree',
+      Array.isArray(out.mcpDomTags) && out.mcpDomTags.includes('strong') && out.mcpDomTags.includes('button'),
+      JSON.stringify(out.mcpDomTags));
+    eq('mcp: patchFiles settles once the build is done', out.mcpIdle, 'ok');
+    eq('mcp: patchFiles drives the HMR pipeline', out.mcpH1, TEAL);
+    eq('mcp: patchFiles preserves component state', out.mcpCountAfter, out.mcpCountBefore);
+    check('mcp: getStructuredLogs returns structured entries',
+      out.mcpLogFields === 'data,domain,level,message,ts' && out.mcpLogCount > 0,
+      `${out.mcpLogCount} entries, fields ${out.mcpLogFields}`);
+    check('mcp: getStructuredLogs returns the latest cycle, not a stale one',
+      out.mcpStyleDomains.includes('HMR') && !out.mcpStyleDomains.includes('Pipeline'),
+      `style cycle: ${JSON.stringify(out.mcpStyleDomains)}`);
+    check('mcp: a later build opens a new cycle (TS edit → Pipeline/Sandbox)',
+      out.mcpSecondIdle === 'ok' && out.mcpTsDomains.includes('Pipeline') && out.mcpTsDomains.includes('Sandbox'),
+      `${out.mcpSecondIdle}: ${JSON.stringify(out.mcpTsDomains)} (${out.mcpTsLogCount} entries)`);
+    eq('mcp: whenIdle times out when no build is pending', out.mcpTimeout, 'timeout');
+    check('demo: the Agent (MCP) button drives the bridge',
+      typeof out.agentLine === 'string' && out.agentLine.includes('patchFiles -> ok') && out.agentLine.includes('readVFS 12 files'),
+      out.agentLine);
+  }
 
   eq('no uncaught page errors', JSON.stringify(out.consoleErrs), '[]');
 }

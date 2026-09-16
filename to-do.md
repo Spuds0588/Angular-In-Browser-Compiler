@@ -74,14 +74,25 @@ YAGNI, with a note on when to revisit.
   18+/19+, where the CLI's HMR support lands.)
 
 ## Phase 9: LLM Bridge (V2)
-- [ ] `window.__NG_BUILDER_MCP__` — (V2, per PRD)
+- [x] `window.__NG_BUILDER_MCP__` — exposed by the constructor (opt out with `{ mcp: false }`)
+- [x] `readVFS()` → `{ 'src/main.ts': '...' }` (a plain object copy of the VFS map)
+- [x] `patchFiles(files)` → `batch()` (one rebuild for N edits) and returns a promise that
+  resolves when that build settles, so an agent never polls
+- [x] `getStructuredLogs()` → the `{ts, level, domain, message, data}` entries of the LATEST
+  compilation cycle (`log()` appends to `_cycleLogs`; `rebuild()` rotates to `_lastCycleLogs`)
+- [x] `inspectDOM(selector?, maxDepth?)` → JSON `{tag, attrs, text, children}` tree of the
+  sandbox DOM, script/style/link filtered, depth-capped + 2000-node budgeted
+- [x] `whenIdle(timeoutMs?)` → `{status: 'ok'|'error'|'timeout'}` (also `builder.whenIdle()`)
+- [x] Demo **Agent (MCP)** button: readVFS → patchFiles → await → inspectDOM, printed as one
+  log line; verified by the e2e suite (11 MCP assertions).
 
 ## Phase 10: Verification tooling
 - [x] Committed e2e harness (`test/e2e.mjs` — plain Node + Chrome DevTools Protocol, no test
-  framework) covering the whole V1 surface: **33 assertions** (bootstrap, Material-derived
+  framework) covering the whole surface: **44 assertions** (bootstrap, Material-derived
   Sass, VFS assets via HttpInterceptor, Router with the host URL untouched, style fast
   refresh incl. an appended rule + nested `@media`, the unmatched-sheet fallback, the
-  compile-error boundary + recovery, uncaught-error and console-error checks).
+  compile-error boundary + recovery, the V2 MCP bridge incl. the demo's Agent button,
+  uncaught-error and console-error checks).
 - [x] Committed demo server (`scripts/serve.mjs`) — replaces the throwaway `/tmp` one; serves
   the repo root so `demo/` can import `../src`.
 - [x] `npm run serve` / `test` / `test:headed` / `test:live` (deployed Pages origin) / `lint`
@@ -106,5 +117,7 @@ YAGNI, with a note on when to revisit.
   features verified live in Chromium (bootstrap, HMR, error boundary + recovery,
   HttpInterceptor, blob assets, SCSS with `$var`).
 - ✅ **Phase 8 fast refresh**: styles/SCSS done (state-preserving, session 6); templates
-  deferred with evidence (no Angular 17 HMR API). Everything else in Phase 1–8 is checked;
-  Phase 9 (LLM bridge) is the next milestone.
+  deferred with evidence (no Angular 17 HMR API).
+- ✅ **Phase 9 LLM bridge (V2)**: `window.__NG_BUILDER_MCP__` done (session 8) — the PRD's
+  whole Phase 9 task list is checked. Every PRD phase is now either implemented or deferred
+  with a documented reason, so the remaining work is hardening/ideas rather than V1 scope.

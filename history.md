@@ -467,7 +467,39 @@ break/fix error boundary → `console.errors === []`.
   localhost tool.
 
 ### Open questions for next sessions
-- (unchanged) template fast refresh (Angular 17 has no HMR metadata API); V2 LLM bridge.
+- (unchanged) template fast refresh (Angular 17 has no HMR metadata API).
 - The suite asserts hardcoded demo expectations (`$brand` colours, `$nav-bg`, `$muted`,
   the interceptor payload) — changing the demo means updating those constants in
   `test/e2e.mjs`.
+
+---
+
+## 2026-09-15 — Session 8: V2 LLM bridge (`window.__NG_BUILDER_MCP__`)
+
+### What landed
+- **`window.__NG_BUILDER_MCP__`** — the PRD's Phase 9 list, all five methods:
+  `readVFS()`, `patchFiles(files)` (= `batch` + `whenIdle`, returns a promise), 
+  `getStructuredLogs()`, `inspectDOM(selector?, maxDepth?)`, `whenIdle(timeoutMs?)`.
+  Set in the constructor; **`{ mcp: false }` opts out** (it is a global with VFS-write power,
+  so the escape hatch matters). `builder.whenIdle()` also exists on the instance.
+- **Cycle-scoped logs**: `log()` appends to `_cycleLogs`; `rebuild()` rotates
+  `_cycleLogs` → `_lastCycleLogs`; `getStructuredLogs()` returns the current cycle if it has
+  entries, else the previous one. That is what "last compilation cycle" means here.
+- **`inspectDOM`** walks `frame.contentDocument` (same-origin srcdoc), depth-capped (12),
+  2000-node budgeted, `script`/`style`/`link`/`meta` filtered, leaf text trimmed to 500 chars.
+- **Demo**: `Agent (MCP)` button + `#logs li.mcp` styling — readVFS → patchFiles(shared SCSS
+  token) → await → inspectDOM, printed as one line (no editor, no UI state involved).
+- **e2e**: +11 MCP assertions (now **44/44**).
+
+### Notes / gotchas
+- **Don't "fix" the log asymmetry**: a style-only fast-refresh cycle contains *only* `HMR`
+  entries, while a TS cycle contains `Pipeline`/`Prefetch`/`Sandbox`. The first version of the
+  e2e check demanded `HMR`+`Pipeline` in one cycle and correctly failed; the useful invariant
+  is "the returned logs belong to the LATEST cycle" — now asserted both ways (style cycle has
+  no `Pipeline`; a following TS edit switches to `Pipeline`+`Sandbox`).
+- `whenIdle` unsubscribes by deleting its handlers out of `this.listeners` (no public `off`
+  added — YAGNI) and always settles, so an agent can't hang: `'timeout'` after `timeoutMs`.
+- Asserted with a 1 ms timeout that the guard actually fires, rather than trusting the code.
+
+### Verification
+`npm test` → **44/44, exit 0** locally.

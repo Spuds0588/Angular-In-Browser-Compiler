@@ -229,7 +229,7 @@ function RUNNER() {
 const RUNNER_SOURCE = '(' + RUNNER.toString() + ')()';
 
 export class AngularBrowserBuilder {
-  constructor({ container, versions = {}, main = 'src/main.ts' } = {}) {
+  constructor({ container, versions = {}, main = 'src/main.ts', mcp = true } = {}) {
     this.container = container;
     this.versions = { ...DEFAULT_VERSIONS, ...versions };
     this.main = main;
@@ -246,6 +246,9 @@ export class AngularBrowserBuilder {
     this._full = true;         /* force a full rebuild (setFiles / delete / failed style patch) */
     this._lastStyles = null;   /* raw CSS per style path, as last handed to the sandbox */
     this._pendingPatch = null; /* in-flight style fast-refresh payload */
+    this._cycleLogs = [];      /* structured logs of the compilation in flight */
+    this._lastCycleLogs = [];  /* ...and of the previous one (getStructuredLogs fallback) */
+    this._mcp = this._createMcp();
     this._onFrameMessage = (ev) => {
       const d = ev.data;
       if (!d || !d.__ngBuilder) return;
@@ -282,6 +285,10 @@ export class AngularBrowserBuilder {
         this.emit('runtimeError', d.error);
       }
     };
+    /* V2 LLM bridge (PRD Phase 9): a global an agent driving browser-skills can use to
+       read/write the VFS, wait for builds, read structured logs and inspect the DOM.
+       Opt out with `new AngularBrowserBuilder({ mcp: false })`. */
+    if (mcp !== false) globalThis.__NG_BUILDER_MCP__ = this._mcp;
   }
 
   on(event, fn) {
@@ -297,6 +304,7 @@ export class AngularBrowserBuilder {
   log(domain, level, message, data) {
     const entry = { ts: Date.now(), level, domain, message, data };
     console.log(`[AngularBuilder::${domain}] ${message}`, data ?? '');
+    this._cycleLogs.push(entry);
     this.emit('log', entry);
     return entry;
   }
@@ -317,10 +325,66 @@ export class AngularBrowserBuilder {
 
   deleteFile(path) { this.files.delete(path); this._full = true; return this.rebuild(); }
 
+  /** Resolves when the next build settles: `{ status: 'ok' | 'error' | 'timeout', … }`.
+   *  Builds are async, so this is how a caller (or an agent) knows the VFS edit took. */
+  whenIdle(timeoutMs = 60000) {
+    return new Promise((resolve) => {
+      const handlers = {};
+      const finish = (result) => {
+        clearTimeout(timer);
+        for (const [event, fn] of Object.entries(handlers)) this.listeners.get(event)?.delete(fn);
+        resolve(result);
+      };
+      const message = (e) => (e && (e.data?.message ?? e.message)) ?? String(e);
+      handlers.success = () => finish({ status: 'ok' });
+      handlers.compileError = (e) => finish({ status: 'error', message: message(e) });
+      handlers.runtimeError = (e) => finish({ status: 'error', message: message(e) });
+      const timer = setTimeout(() => finish({ status: 'timeout' }), timeoutMs);
+      for (const [event, fn] of Object.entries(handlers)) this.on(event, fn);
+    });
+  }
+
+  /* --------------------------------------------- LLM bridge (PRD Phase 9) */
+
+  /** The PRD's `window.__NG_BUILDER_MCP__` surface — see README for the contract. */
+  _createMcp() {
+    return {
+      readVFS: () => Object.fromEntries(this.files),
+      patchFiles: (files) => { this.batch(files); return this.whenIdle(); },
+      getStructuredLogs: () => (this._cycleLogs.length ? this._cycleLogs : this._lastCycleLogs),
+      whenIdle: (timeoutMs = 60000) => this.whenIdle(timeoutMs),
+      inspectDOM: (selector = null, maxDepth = 12) => this._inspectDOM(selector, maxDepth),
+    };
+  }
+
+  /** A JSON tree of the sandbox DOM (tag + attributes + leaf text) for agents: depth-capped,
+   *  node-budgeted, and free of script/style/link noise. Returns null before the frame exists. */
+  _inspectDOM(selector = null, maxDepth = 12) {
+    const doc = this.frame && this.frame.contentDocument;
+    if (!doc || !doc.body) return null;
+    let budget = 2000;
+    const walk = (el, depth) => {
+      if (budget-- <= 0) return null;
+      const attrs = {};
+      for (const a of el.attributes) attrs[a.name] = a.value;
+      const children = depth >= maxDepth ? [] : [...el.children]
+        .filter((c) => !['script', 'style', 'link', 'meta'].includes(c.tagName.toLowerCase()))
+        .map((c) => walk(c, depth + 1)).filter(Boolean);
+      const node = { tag: el.tagName.toLowerCase(), attrs };
+      if (children.length) node.children = children;
+      else if (el.textContent.trim()) node.text = el.textContent.trim().slice(0, 500);
+      return node;
+    };
+    const root = selector ? doc.querySelector(selector) : doc.body;
+    return root ? { root: walk(root, 0), truncated: budget <= 0 } : null;
+  }
+
   /* ------------------------------------------------------------ pipeline */
 
   /** A change is an HTML/CSS "fast refresh" candidate when only stylesheets moved. */
   rebuild() {
+    this._lastCycleLogs = this._cycleLogs.length ? this._cycleLogs : this._lastCycleLogs;
+    this._cycleLogs = [];
     const dirty = [...this._dirty];
     this._dirty = new Set();
     const styleOnly = !this._full && dirty.length > 0 &&

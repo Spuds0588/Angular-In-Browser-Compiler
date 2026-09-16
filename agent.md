@@ -50,6 +50,18 @@ Pipeline on every `rebuild()`:
 Errors: host-side failures (TS/SCSS/fetch) emit `compileError` and the iframe keeps the
 last-good build. Iframe-side failures postMessage structured `runtimeError`.
 
+**V2 LLM bridge** — `window.__NG_BUILDER_MCP__`, set in the constructor unless
+`{ mcp: false }`, built by `_createMcp()`:
+- `readVFS` / `patchFiles` (= `batch` + `whenIdle`) / `whenIdle` / `inspectDOM`.
+- `getStructuredLogs` returns the **latest compilation cycle**: `log()` appends to
+  `_cycleLogs` and `rebuild()` rotates `_cycleLogs` → `_lastCycleLogs` (the fallback). A
+  style-only cycle legitimately contains only `HMR` entries; a TS edit produces
+  `Pipeline`/`Prefetch`/`Sandbox`. Do not "fix" that asymmetry.
+- `inspectDOM` reads `frame.contentDocument` (same origin — the srcdoc inherits it), walks
+  with a depth cap + 2000-node budget, filters `script`/`style`/`link`/`meta`, and returns
+  plain JSON (never DOM nodes; the result crosses a postMessage-free boundary but an agent
+  may serialize it).
+
 HMR: every rebuild re-runs `main.ts` in the iframe. If the app stored
 `window.__NG_APP_REF__` (demo main.ts does), the runner destroys it and re-bootstraps
 (state resets, host page never refreshes); otherwise it falls back to an internal
