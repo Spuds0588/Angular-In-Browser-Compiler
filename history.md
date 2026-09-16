@@ -457,7 +457,14 @@ break/fix error boundary → `console.errors === []`.
   still stands.
 
 ### Verification
-`npm test` → **33/33, exit 0** locally (only ignored console entry: the favicon 404).
+- `npm test` → **33/33, exit 0** locally (only ignored console entry: the favicon 404).
+- Pushed as `8b46575` → the new **CI workflow ran on GitHub: 33/33 in ~3.7 min** (cold
+  jsdelivr fetches; a warm local run is ~2.5 min). It installs nothing — Node 22's global
+  `WebSocket` is the only requirement.
+- **`npm run test:live` — the full 33 checks against the deployed github.io demo: 33/33,
+  exit 0.** Style fast refresh, the unmatched-sheet fallback and the error boundary all
+  behave identically in production, so the suite is a valid release gate, not just a
+  localhost tool.
 
 ### Open questions for next sessions
 - (unchanged) template fast refresh (Angular 17 has no HMR metadata API); V2 LLM bridge.
