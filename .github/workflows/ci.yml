@@ -1,0 +1,24 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      # Node 22 ships a global WebSocket, so the harness needs no dependencies at all.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Chrome version
+        run: google-chrome --version
+      - name: Syntax check
+        run: npm run lint
+      - name: E2E (headless Chromium over CDP)
+        run: npm test

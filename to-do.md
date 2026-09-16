@@ -76,6 +76,17 @@ YAGNI, with a note on when to revisit.
 ## Phase 9: LLM Bridge (V2)
 - [ ] `window.__NG_BUILDER_MCP__` — (V2, per PRD)
 
+## Phase 10: Verification tooling
+- [x] Committed e2e harness (`test/e2e.mjs` — plain Node + Chrome DevTools Protocol, no test
+  framework) covering the whole V1 surface: **33 assertions** (bootstrap, Material-derived
+  Sass, VFS assets via HttpInterceptor, Router with the host URL untouched, style fast
+  refresh incl. an appended rule + nested `@media`, the unmatched-sheet fallback, the
+  compile-error boundary + recovery, uncaught-error and console-error checks).
+- [x] Committed demo server (`scripts/serve.mjs`) — replaces the throwaway `/tmp` one; serves
+  the repo root so `demo/` can import `../src`.
+- [x] `npm run serve` / `test` / `test:headed` / `test:live` (deployed Pages origin) / `lint`
+  (`node --check`). CI runs lint + e2e on every push and PR (`.github/workflows/ci.yml`).
+
 ## Known gaps / next steps
 - Global `styles.css` from angular.json is not supported (components' styles only)
 - Template refs to non-asset URLs (e.g. `http://...`) left as-is
@@ -84,6 +95,10 @@ YAGNI, with a note on when to revisit.
 - `globalThis.require` stub pollutes host global (sass only) — iframe-local sass or dedicated build would remove it
 - ✅ Demo Apply/Fix now use `builder.batch(files)` — one build per apply (added in session 3)
 - Sandbox CSP needs `'unsafe-eval'` in script-src — documented trade-off in README
+- `NG0912: Component ID generation collision detected` is logged as a *warning* after soft
+  reloads: Angular's JIT id registry lives on the sandbox document, so each re-bootstrap
+  mints a new id for the same class. Benign (the old tree is gone); the e2e suite asserts no
+  console *errors*, favicon 404 aside.
 - Sass importer ambiguity (accepted): a bare `@use "variables"` tries the importing file's dir first, then VFS root — a same-named file at both levels would resolve to the dir one
 
 ## V1 status

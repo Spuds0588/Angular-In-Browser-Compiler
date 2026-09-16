@@ -10,6 +10,13 @@
   "files": [
     "src"
   ],
+  "scripts": {
+    "serve": "node scripts/serve.mjs",
+    "test": "node test/e2e.mjs",
+    "test:headed": "node test/e2e.mjs --headed",
+    "test:live": "node test/e2e.mjs --url https://spuds0588.github.io/Angular-In-Browser-Compiler/",
+    "lint": "node --check src/angular-browser-builder.js && node --check demo/controls.js && node --check demo/demo-app.js && node --check scripts/serve.mjs && node --check test/e2e.mjs"
+  },
   "keywords": [
     "angular",
     "compiler",
@@ -18,5 +25,8 @@
     "sandbox",
     "csp"
   ],
-  "license": "MIT"
+  "license": "MIT",
+  "devDependencies": {
+    "ws": "^8.18.0"
+  }
 }

@@ -423,3 +423,44 @@ break/fix error boundary → `console.errors === []`.
 - Sass npm resolution is eager for the full graph of `@use '@angular/material'` (every
   component theme forwards + MDC). A targeted `mat.define-theme` (M3) demo instead of
   the legacy palette API would exercise a smaller subgraph.
+
+---
+
+## 2026-09-15 — Session 7: committed e2e harness + CI (verification stops living in /tmp)
+
+### What landed
+- **`test/e2e.mjs`** — the whole V1 surface as **33 assertions**, in headless Chromium over
+  CDP with **no test framework** (plain Node + `node:child_process`). Supersedes every
+  throwaway `/tmp/cdp*/check*.mjs` from sessions 3–6, which are now redundant.
+- **`scripts/serve.mjs`** — the demo's static server, committed (was `/tmp/serve.js`, which
+  kept dying between turns). Serves the repo root so `demo/` can import `../src`.
+- **`package.json` scripts**: `serve`, `test`, `test:headed`, `test:live` (deployed origin),
+  `lint` (`node --check` over src/demo/scripts/test). **`.gitignore`**: `node_modules/`,
+  `.freebuff/`.
+- **CI** (`.github/workflows/ci.yml`): Node 22 + the runner's preinstalled Chrome →
+  `npm run lint` + `npm test` on every push/PR. Node 22 has a global `WebSocket`, so CI
+  installs nothing at all.
+- `ws` is a **test-only devDependency** (Node < 22 fallback): the harness prefers
+  `globalThis.WebSocket` and dynamic-imports `ws` only when absent. `src/` stays dep-free.
+
+### Gotchas found while building it (do not re-derive)
+- **`new URL('.', import.meta.url).pathname` percent-encodes spaces** — spawning with it makes
+  Node look for `/home/.../Coding%20Projects/.../scripts/serve.mjs`. Use `fileURLToPath()`.
+- **`window.__BUILDER__` is undefined when `#status` first appears**: `#status` is static HTML,
+  so the demo's module graph may not have executed yet. `builder.getFile` then throws
+  "Cannot read properties of undefined" — read `__BUILDER__` *after* the boot wait.
+- **CDP `Log.entryAdded` reports `text` WITHOUT the URL** ("Failed to load resource: … 404"),
+  so a `!text.includes('favicon')` filter can never match and the suite fails on the demo's
+  only 404. Record `entry.url` next to `entry.text`; confirmed that url is `/favicon.ico`.
+- Chrome's `--remote-debugging-port=0` + reading `DevToolsActivePort` from the profile dir
+  removes CDP port collisions entirely; the **fresh temp profile per run** rule (session 4)
+  still stands.
+
+### Verification
+`npm test` → **33/33, exit 0** locally (only ignored console entry: the favicon 404).
+
+### Open questions for next sessions
+- (unchanged) template fast refresh (Angular 17 has no HMR metadata API); V2 LLM bridge.
+- The suite asserts hardcoded demo expectations (`$brand` colours, `$nav-bg`, `$muted`,
+  the interceptor payload) — changing the demo means updating those constants in
+  `test/e2e.mjs`.

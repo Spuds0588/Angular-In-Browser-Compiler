@@ -6,11 +6,18 @@ Distributed as a single drop-in ESM library. See `PRD-Angular In-Browser Compile
 the full product spec; `to-do.md` for the task list; `history.md` for accumulated learnings.
 
 ## Quick start
-- No build step, no deps, no Node needed for dev.
-- Serve the repo root (e.g. `python3 -m http.server 8000` or any static server) and open
-  `/demo/index.html`. The demo page boots a sample Angular app entirely in-browser.
-- Everything is tested in a real Chromium session (the Freebuff Preview tab, or any browser).
-  There is no unit-test harness yet — the demo page doubles as the smoke test.
+- No build step and no runtime deps (the library is one browser-ESM file).
+- `npm run serve` and open `/demo/index.html`. Serve the **repo root**, never just `demo/`
+  — `demo/controls.js` imports `../src/angular-browser-builder.js`.
+- **`npm test` is the smoke test**: `test/e2e.mjs` boots the demo in headless Chromium over
+  CDP and asserts the whole V1 surface (33 checks — bootstrap, npm-package Sass, VFS assets
+  via the HttpInterceptor, Router with the host URL untouched, style fast refresh, the
+  unmatched-sheet fallback, the compile-error boundary + recovery, clean console). Variants:
+  `npm run test:headed` (watch it), `npm run test:live` (the deployed Pages site),
+  `node test/e2e.mjs --url <page>` / `BASE_URL=` (any origin), `CHROME_BIN=` (other Chrome).
+  CI runs `lint` + `test` on every push (`.github/workflows/ci.yml`).
+- `npm run lint` is a `node --check` syntax pass over every shipped/demo/test file.
+- Manual checks still go through the same demo page (Freebuff Preview tab or any browser).
 
 ## Architecture (V1)
 Single file library: `src/angular-browser-builder.js` (pure browser ESM, no imports).
@@ -63,3 +70,7 @@ HMR: every rebuild re-runs `main.ts` in the iframe. If the app stored
   package), everything must be version-pinned, and `?deps=` aligns hashed rxjs/tslib URLs.
   Empirically verified facts live in `history.md` — read it before changing the pre-fetcher.
 - Do not add npm deps or a bundler without a strong reason; the drop-in story is the point.
+  The only devDependency (`ws`) exists so the test harness runs on Node < 22 (Node 22+ has a
+  global WebSocket) — it never ships and is never imported by `src/`.
+- Automated browser checks need a **fresh Chrome profile per run**. A reused profile serves
+  cached 404s and reports a fake "idle" status; this has cost two debug cycles already.

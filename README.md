@@ -58,6 +58,26 @@ export class AppComponent {}`,
 See `demo/` for a full interactive host page (editor + Apply/Recolor/Break/Fix buttons,
 structured log panel).
 
+## Verify it works
+
+```bash
+npm run serve          # static server for the repo root → http://127.0.0.1:8137/demo/index.html
+npm test               # headless Chromium over CDP: 33 end-to-end checks, exit code 0/1
+npm run test:headed    # same, with a visible browser
+npm run lint           # node --check over src/, demo/, scripts/, test/
+```
+
+The suite (`test/e2e.mjs`, no test framework — plain Node + the Chrome DevTools Protocol)
+boots the demo and asserts the V1 contract: bootstrap, `@angular/material` Sass resolved
+through the npm importer, VFS assets served by the auto-injected HttpInterceptor, Router
+navigation that leaves the host URL alone, state-preserving SCSS fast refresh (including an
+appended rule and a nested `@media`), the unmatched-sheet fallback, the compile-error
+boundary with recovery, and a clean console. `npm run test:live` runs the same suite against
+the deployed GitHub Pages demo.
+
+Requirements: Chrome/Chromium (`CHROME_BIN=` to override) and Node 22+ (for the built-in
+WebSocket). On older Node: `npm i` to pick up the test-only `ws` devDependency.
+
 ## API
 
 | Method | Purpose |
