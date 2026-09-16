@@ -502,4 +502,18 @@ break/fix error boundary → `console.errors === []`.
 - Asserted with a 1 ms timeout that the guard actually fires, rather than trusting the code.
 
 ### Verification
-`npm test` → **44/44, exit 0** locally.
+- `npm test` → **44/44, exit 0** locally.
+- Pushed `02a5f78` → CI green on GitHub (44/44 on the runner), Pages redeployed.
+- **`npm run test:live` against the deployed github.io demo: 44/44, exit 0** — the bridge
+  (including the demo's Agent button and `patchFiles` triggering a state-preserving fast
+  refresh) behaves identically in production, and `window.__NG_BUILDER_MCP__` is therefore
+  usable against the public demo URL.
+
+### Try it by hand (any agent session)
+```js
+const mcp = window.__NG_BUILDER_MCP__;
+mcp.readVFS();                      // {'src/main.ts': '…', …}
+await mcp.patchFiles({ 'src/app/_variables.scss': tokens.replace('$indigo-palette', '$teal-palette') });
+mcp.getStructuredLogs();            // latest cycle only
+mcp.inspectDOM('app-home');         // JSON tree of the sandbox DOM
+```
