@@ -409,6 +409,12 @@ break/fix error boundary → `console.errors === []`.
   import mask it? (Check by removing compiler from the always-imported set.)
 - `globalThis.require` stub pollutes the host global — acceptable for V1; a dedicated
   esm.sh build or an iframe-local sass worker would remove it.
+- Session 6 deploy: pushed af24e72 → Pages workflow succeeded → headless-Chrome CDP check
+  against the LIVE github.io demo: boot with 2 injected `<style>` nodes, h1 = Material
+  `$brand` (rgb(63,81,181)), interceptor JSON, About nav with the host URL staying on
+  github.io, then **Recolor → h1 teal-500 with the count preserved (2)**, host URL unchanged,
+  and a following soft reload keeps the patched teal. The fast-refresh path behaves
+  identically in production.
 - Next PRD milestones: template fast refresh (blocked on Angular's HMR API — see session 6),
   then the V2 LLM bridge (`window.__NG_BUILDER_MCP__`).
 - Style fast refresh currently recompiles EVERY stylesheet on each style-only edit (needed so
