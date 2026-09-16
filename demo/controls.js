@@ -35,6 +35,17 @@ $('btn-apply').addEventListener('click', () => {
   });
 });
 
+/* Style-only edit: flips the shared $brand token (indigo <-> teal). The builder
+   patches the live <style> nodes instead of re-bootstrapping, so the counter and the
+   active route survive the change. */
+const GOOD_SCSS = appFiles['src/app/_variables.scss'];
+let alt = false;
+$('btn-recolor').addEventListener('click', () => {
+  alt = !alt;
+  builder.updateFile('src/app/_variables.scss',
+    GOOD_SCSS.replace('mat.$indigo-palette', alt ? 'mat.$teal-palette' : 'mat.$indigo-palette'));
+});
+
 $('btn-break').addEventListener('click', () => {
   $('ts-editor').value = GOOD_TS.replace('export class AppComponent', 'export class AppComponent { const x = ;');
   builder.updateFile('src/app/app.component.ts', $('ts-editor').value);

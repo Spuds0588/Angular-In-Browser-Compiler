@@ -13,7 +13,9 @@ Feed it a virtual file system (TypeScript + HTML + CSS/SCSS + JSON + assets) and
    user deps as self-contained `?bundle` modules.
 3. **Executes** the app inside a sandboxed `srcdoc` iframe that inherits the host CSP:
    Angular JIT bootstrap, `new Function` CJS wrapper — all eval confined to the sandbox.
-4. **Hot-reloads** on every file edit (soft reload: full re-transpile + re-bootstrap).
+4. **Hot-reloads**: a stylesheet-only edit is a **fast refresh** — the app is not torn down, so
+   component state and the active route survive; TypeScript/HTML edits soft-reload
+   (re-transpile + re-bootstrap, state resets).
 5. **Guards errors**: TS `diagnostics` are checked before anything reaches the sandbox
    (`compileError`, last-good build kept); runtime errors stream back as `runtimeError`.
 
@@ -53,8 +55,8 @@ export class AppComponent {}`,
 });
 ```
 
-See `demo/` for a full interactive host page (editor + Apply/Break/Fix buttons, structured
-log panel).
+See `demo/` for a full interactive host page (editor + Apply/Recolor/Break/Fix buttons,
+structured log panel).
 
 ## API
 
@@ -87,14 +89,19 @@ log panel).
   transitive MDC `@material/*` packages (versions come from the consuming package's
   dependencies; pinned package versions live in the builder's `versions` map). The
   demo shares a `src/app/_variables.scss` whose `$brand` is Material-derived.
+- **Fast refresh (styles)**: an SCSS/CSS-only rebuild recompiles the stylesheets and patches
+  the live `<style>` nodes inside the sandbox (no re-bootstrap) — counters, form state and
+  the current route survive the edit. When a sheet cannot be matched to a live node the
+  builder falls back to a soft reload. Template edits still soft-reload: Angular 17 has no
+  public API to swap a live component's template.
 - Error boundaries: compile errors keep the last-good build on screen.
 
 ## Known limits (see to-do.md)
 
-- No HTML/CSS fast refresh (V1 soft-reloads), global `styles.css` from angular.json
-  unsupported, binaries must be `data:` URLs, sass installs a small
-  `globalThis.require` stub on the host, a bare `@use "x"` prefers the importing
-  file's dir over the VFS root.
+- No TEMPLATE fast refresh (HTML edits soft-reload — Angular 17 lacks the HMR metadata API),
+  global `styles.css` from angular.json unsupported, binaries must be `data:` URLs, sass
+  installs a small `globalThis.require` stub on the host, a bare `@use "x"` prefers the
+  importing file's dir over the VFS root.
 
 ## License
 

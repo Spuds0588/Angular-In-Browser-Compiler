@@ -61,7 +61,17 @@ YAGNI, with a note on when to revisit.
 - [x] Last-known-good preserved on compile error (iframe untouched; structured `compileError`; host checks TS `diagnostics` BEFORE sending — `transpileModule` emits broken output on syntax errors)
 - [x] Structured `runtimeError` postMessage from iframe (bootstrap catch + `window.onerror`)
 - [x] Soft reload on TS edits (state resets, no host refresh)
-- [ ] HTML/CSS Fast Refresh (state preservation via template-cache clear) — (deferred; V1 soft-reloads everything. Revisit with `ɵclearResolutionOfComponentResourcesQueue` research)
+- [x] **CSS/SCSS Fast Refresh (state preservation)** — a rebuild whose only changes are
+  stylesheets recompiles them and patches the live `<style>` nodes in the sandbox instead of
+  re-bootstrapping: component state and the active route survive (demo `Recolor` button).
+  Verified: teal/indigo `$brand` swap with the counter and route preserved, count preserved
+  across two consecutive patches, an appended rule + nested `@media` both applied, and the
+  patched CSS inherited by the next soft reload. Falls back to a soft reload when a sheet
+  cannot be matched to a live node. See history.md session 6 for the shim/`%COMP%` details.
+- [ ] **HTML (template) Fast Refresh** — (deferred, blocked: Angular 17.3.12 exposes no HMR
+  metadata API — `ɵɵreplaceMetadata` is absent from `@angular/core@17.3.12`, so a live
+  component's template cannot be swapped. Template edits soft-reload. Revisit on Angular
+  18+/19+, where the CLI's HMR support lands.)
 
 ## Phase 9: LLM Bridge (V2)
 - [ ] `window.__NG_BUILDER_MCP__` — (V2, per PRD)
@@ -80,3 +90,6 @@ YAGNI, with a note on when to revisit.
 - ✅ **Committed** (e2b006f): library + demo + agent/to-do/history docs. All Phase 1–5, 7, 8
   features verified live in Chromium (bootstrap, HMR, error boundary + recovery,
   HttpInterceptor, blob assets, SCSS with `$var`).
+- ✅ **Phase 8 fast refresh**: styles/SCSS done (state-preserving, session 6); templates
+  deferred with evidence (no Angular 17 HMR API). Everything else in Phase 1–8 is checked;
+  Phase 9 (LLM bridge) is the next milestone.

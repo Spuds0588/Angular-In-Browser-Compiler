@@ -332,13 +332,88 @@ compile on the live origin ≈ 45 s, cached thereafter.
 
 ---
 
+## 2026-09-15 — Session 6: HTML/CSS Fast Refresh (styles half) + state-preserving SCSS edits
+
+### What landed (verified with headless Chromium over CDP)
+- **Style-only fast refresh.** `rebuild()` now dispatches: when EVERY file changed since the
+  last build is `.css`/`.scss` (and the app is booted with no pending error) it takes
+  `_patchStyles()` instead of `_rebuildFull()` — it recompiles the stylesheets and asks the
+  sandbox to swap the text of the LIVE `<style>` nodes. The app is never torn down, so
+  component state AND the active route survive an SCSS/CSS edit. Logged as
+  `[AngularBuilder::HMR] styles patched in place — component state preserved`.
+- **`_lastStyles`** (raw CSS per path, as last handed to the sandbox) is the baseline for
+  the diff; a successful patch also rewrites `lastGood.modules[path]`, so the NEXT soft
+  reload inherits the patched CSS instead of reverting it. `_dirty`/`_full` track what
+  changed: `setFiles`/`deleteFile` force a full rebuild, `updateFile`/`batch` are eligible
+  for the fast path.
+- **Demo**: new `Recolor (SCSS fast refresh)` button — flips `$brand` between
+  `mat.$indigo-palette` and `mat.$teal-palette` in the shared `_variables.scss`.
+
+### The discovery that makes it possible (do not re-derive)
+- Angular shims component styles at **JIT-compile time**: the compiler turns each rule into
+  `sel[_ngcontent-%COMP%]`, and platform-browser's renderer only substitutes the live id
+  (`Oe(id, def.styles)` = `styles.map(s => s.replace(/%COMP%/g, id))`). Two components with
+  the same stylesheet therefore produce IDENTICAL style text apart from the id — which is
+  exactly what makes a live `<style>` node matchable and patchable.
+- **Do not re-implement the shim.** Angular's `ShadowCss` (class `_o` in the compiler
+  bundle) is NOT exported (232 exports checked). Instead, get the shimmed template from the
+  JIT itself: JIT-compile a throwaway probe component in the sandbox —
+  `core.Component({ selector: 'ngb-shim-probe', template: '', styles: [css] })(Probe)` — then
+  read the def off `Probe['ɵcmp']` (`def.styles` is the `%COMP%` template). One probe per
+  file per patch; `styles: [oldCss, newCss]` gives both templates index-aligned.
+- **Matching a node**: extract the id with `/\[_ngcontent-([^\]]+)\]/` from each candidate
+  `<style>`, then require `tpl.replace(/%COMP%/g, id) === node.textContent` (full-string
+  equality — no markers injected into user CSS, no partial-match guesswork). Patch EVERY
+  matching node (two components can share one stylesheet).
+- **Fallback, not fragility**: `not-injected` when the previous CSS has no `{` (a
+  variables-only partial like `_variables.scss` compiles to an empty sheet and was never
+  injected) and `no-node`/`shim-failed` otherwise → the host logs a warning and re-runs the
+  FULL build (soft reload). Verified by deleting the style nodes from the sandbox DOM
+  before a patch: the app recovered with the new rule applied.
+
+### Why templates still soft-reload (deferred, with evidence)
+- **Angular 17.3.12 has no HMR metadata API**: `ɵɵreplaceMetadata` / `u0275replaceMetadata`
+  do not exist in `@angular/core@17.3.12/es2022/core.mjs` (the minified exports were listed;
+  only `ɵsetClassMetadata`, `ɵngDeclareClassMetadata`, … are present). Swapping a live
+  component's template needs that API (Angular CLI HMR), so HTML edits keep the V1 soft
+  reload. Revisit on Angular 18+/19+ — the styles path here is independent of it.
+
+### Verification (headless Chromium, fresh profile, CDP; demo served statically)
+boot → h1 `rgb(63,81,181)` (Material indigo-500) → interceptor JSON → About/Home nav with
+host URL untouched → `+1`x3 → **Recolor → h1 `rgb(0,150,136)` (teal-500) with count STILL 3,
+route still Home, `#status` still "app running", style node count 2 → 2** → soft reload (TS
+edit) keeps the PATCHED teal AND resets count → second Recolor back to indigo with the 2
+clicks preserved → appended `strong {}` rule + nested `@media` in home.component.scss both
+apply (rgb(192,57,43), letter-spacing 2px) with count preserved → HTML edit → soft reload
+(as designed) → fallback test (style nodes deleted from the DOM) → soft reload recovers →
+break/fix error boundary → `console.errors === []`.
+
+### Tooling gotchas (cost real time this session)
+- `pkill -f "node /tmp/serve.js"` ALSO matches the bash process running the command (the
+  pattern appears in its own command line) — it kills the shell and you lose all output.
+  Get the pid from `ss -ltnp | grep <port>` instead.
+- A detached static server (`setsid nohup … &`) does NOT reliably survive between commands
+  here; keep the whole run in ONE command — spawn the server from the CDP harness itself
+  (and use a hardcoded port: this shell has `PORT=0` in its env).
+- `register_preview` with `replace: true` STOPS the pid currently registered — passing the
+  same pid kills your server. Register the new server's pid once and leave it alone.
+- Writing harness code through the file tools double-escapes backslashes: a `\n` inside an
+  outer template literal can arrive as a REAL newline and break the inner script. Use
+  `String.fromCharCode(10)` / no escapes in such scripts.
+- Dev-mode `NG0912 (Component ID generation collision … 'AppComponent' and 'AppComponent')`
+  fires on every soft reload — a second AppComponent is compiled with the same selector
+  while the old class is still alive. Pre-existing, harmless (the old tree is destroyed).
+
 ### Open questions for next sessions
 - Does esm.sh rewrite the dynamic `import('@angular/compiler')` or did the eager framework
   import mask it? (Check by removing compiler from the always-imported set.)
 - `globalThis.require` stub pollutes the host global — acceptable for V1; a dedicated
   esm.sh build or an iframe-local sass worker would remove it.
-- Next PRD milestones: HTML/CSS fast refresh (state-preserving edits), then V2 LLM bridge
-  (`window.__NG_BUILDER_MCP__`).
+- Next PRD milestones: template fast refresh (blocked on Angular's HMR API — see session 6),
+  then the V2 LLM bridge (`window.__NG_BUILDER_MCP__`).
+- Style fast refresh currently recompiles EVERY stylesheet on each style-only edit (needed so
+  a shared partial's dependents are picked up). Fine at this size; a reverse dependency map
+  would avoid the extra sass work on larger projects.
 - Sass npm resolution is eager for the full graph of `@use '@angular/material'` (every
   component theme forwards + MDC). A targeted `mat.define-theme` (M3) demo instead of
   the legacy palette API would exercise a smaller subgraph.

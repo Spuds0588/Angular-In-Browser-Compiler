@@ -7,6 +7,10 @@
  * Pipeline (every rebuild):
  *   VFS -> regex import scan -> esm.sh pre-fetch (default mode + ?deps pin) -> TS -> CommonJS
  *   -> postMessage into sandboxed iframe (srcdoc doc) -> Angular JIT bootstrap.
+ * A rebuild whose only changes are stylesheets takes the fast-refresh path instead:
+ * the styles are recompiled and the live <style> nodes are patched in place, so the
+ * running app (component state, active route) is never torn down. Template edits still
+ * soft-reload — Angular 17 has no public API to swap a live component's template.
  *
  * Design rules (see history.md / agent.md):
  *   - Host never evals. TS transpiles on the host (pure computation); `new Function`
@@ -123,8 +127,51 @@ function RUNNER() {
     return false;
   }
 
+  /* Angular's JIT shims component styles into a `[_ngcontent-%COMP%]` template and
+     substitutes the live component id when the renderer injects them. Reproduce that
+     template EXACTLY by asking the JIT itself: a throwaway component's def keeps the
+     shaped CSS, so no hand-written re-implementation of the shim rules is needed. */
+  function shimCss(cssList) {
+    var core = externals && externals['@angular/core'];
+    if (!core || !core.Component) return null;
+    var Probe = function Probe() {};
+    try { core.Component({ selector: 'ngb-shim-probe', template: '', styles: cssList })(Probe); }
+    catch (e) { return null; }
+    var def = Probe['\u0275cmp'];
+    return (def && def.styles) || null;
+  }
+
+  /* Style-only fast refresh: replace the text of the live <style> node(s) carrying a
+     stylesheet, keeping the component id already baked into them. Never re-bootstraps,
+     so component state and the active route survive an SCSS/CSS edit. */
+  function patchStyles(d) {
+    var results = {};
+    var keys = Object.keys(d.styles || {});
+    for (var k = 0; k < keys.length; k++) {
+      var p = keys[k], pair = d.styles[p] || {};
+      var from = pair.from, to = pair.to;
+      if (from === to) { results[p] = 'unchanged'; continue; }
+      /* Nothing was ever injected for this sheet (e.g. a variables-only partial). */
+      if (from == null || from.indexOf('{') === -1) { results[p] = 'not-injected'; continue; }
+      var tpl = shimCss([from, to]);
+      if (!tpl || tpl.length !== 2) { results[p] = 'shim-failed'; continue; }
+      var head = document.head, nodes = head ? head.getElementsByTagName('style') : [];
+      var hits = 0;
+      for (var i = 0; i < nodes.length; i++) {
+        var text = nodes[i].textContent || '';
+        var m = /\[_ngcontent-([^\]]+)\]/.exec(text);
+        if (!m || tpl[0].replace(/%COMP%/g, m[1]) !== text) continue;
+        nodes[i].textContent = tpl[1].replace(/%COMP%/g, m[1]);
+        hits++;
+      }
+      results[p] = hits ? 'patched:' + hits : 'no-node';
+    }
+    post({ type: 'stylesPatched', results: results });
+  }
+
   self.onmessage = function (ev) {
     var d = ev.data || {};
+    if (d.type === 'patchStyles') { patchStyles(d); return; }
     if (d.type !== 'bootstrap') return;
     payload = d;
     cache.clear();
@@ -195,6 +242,10 @@ export class AngularBrowserBuilder {
     this._ts = null;
     this._sass = null;
     this._depCache = new Map();
+    this._dirty = new Set();   /* VFS paths changed since the last build */
+    this._full = true;         /* force a full rebuild (setFiles / delete / failed style patch) */
+    this._lastStyles = null;   /* raw CSS per style path, as last handed to the sandbox */
+    this._pendingPatch = null; /* in-flight style fast-refresh payload */
     this._onFrameMessage = (ev) => {
       const d = ev.data;
       if (!d || !d.__ngBuilder) return;
@@ -210,6 +261,21 @@ export class AngularBrowserBuilder {
         } else {
           this.log('Sandbox', 'error', 'bootstrap failed — keeping last-good build', d.error);
           this.emit('runtimeError', d.error);
+        }
+      } else if (d.type === 'stylesPatched') {
+        const pending = this._pendingPatch;
+        this._pendingPatch = null;
+        const results = d.results || {};
+        const bad = Object.entries(results).filter(([, v]) => !(v === 'unchanged' || v === 'not-injected' || v.startsWith('patched')));
+        if (!pending || bad.length) {
+          this.log('HMR', 'warn', 'fast refresh could not patch every stylesheet — falling back to soft reload', { results });
+          this._full = true;
+          this.rebuild();
+        } else {
+          this._lastStyles = { ...this._lastStyles, ...pending.next };
+          for (const p of Object.keys(pending.styles)) this.lastGood.modules[p] = stringModule(pending.styles[p].to);
+          this.log('HMR', 'info', 'styles patched in place — component state preserved', { results });
+          this.emit('success', { ...this.lastGood });
         }
       } else if (d.type === 'runtimeError') {
         this.log('Sandbox', 'error', 'runtime error — keeping last-good build', d.error);
@@ -239,18 +305,32 @@ export class AngularBrowserBuilder {
 
   getFile(path) { return this.files.get(path); }
 
-  setFiles(files) { this.files = new Map(Object.entries(files)); return this.rebuild(); }
+  setFiles(files) { this.files = new Map(Object.entries(files)); this._full = true; return this.rebuild(); }
 
-  updateFile(path, content) { this.files.set(path, content); return this.rebuild(); }
+  updateFile(path, content) { this.files.set(path, content); this._dirty.add(path); return this.rebuild(); }
 
   /** Atomically apply several file edits with a single rebuild (one build, not N). */
-  batch(files) { for (const [p, c] of Object.entries(files)) this.files.set(p, c); return this.rebuild(); }
+  batch(files) {
+    for (const [p, c] of Object.entries(files)) { this.files.set(p, c); this._dirty.add(p); }
+    return this.rebuild();
+  }
 
-  deleteFile(path) { this.files.delete(path); return this.rebuild(); }
+  deleteFile(path) { this.files.delete(path); this._full = true; return this.rebuild(); }
 
   /* ------------------------------------------------------------ pipeline */
 
-  async rebuild() {
+  /** A change is an HTML/CSS "fast refresh" candidate when only stylesheets moved. */
+  rebuild() {
+    const dirty = [...this._dirty];
+    this._dirty = new Set();
+    const styleOnly = !this._full && dirty.length > 0 &&
+      dirty.every((p) => extname(p) === 'css' || extname(p) === 'scss') &&
+      this.booted && this.lastGood && this._lastStyles;
+    this._full = false;
+    return styleOnly ? this._patchStyles() : this._rebuildFull();
+  }
+
+  async _rebuildFull() {
     this.log('Pipeline', 'info', 'build started', { files: this.files.size });
     try {
       const ts = await this._loadTypescript();
@@ -273,6 +353,7 @@ export class AngularBrowserBuilder {
       }
 
       const modules = {};
+      const styles = {}; /* raw CSS per path — reused by the style fast-refresh path */
       for (const [path, src] of this.files) {
         const ext = extname(path);
         if (ext === 'ts') {
@@ -287,9 +368,11 @@ export class AngularBrowserBuilder {
         } else if (ext === 'html') {
           modules[path] = stringModule(this._rewriteTemplateAssets(src, assets));
         } else if (ext === 'css') {
-          modules[path] = stringModule(this._rewriteCssAssets(src, assets));
+          styles[path] = this._rewriteCssAssets(src, assets);
+          modules[path] = stringModule(styles[path]);
         } else if (ext === 'scss') {
-          modules[path] = stringModule(this._rewriteCssAssets(await this._compileScss(src, path), assets));
+          styles[path] = this._rewriteCssAssets(await this._compileScss(src, path), assets);
+          modules[path] = stringModule(styles[path]);
         } else if (ext === 'json') {
           modules[path] = stringModule(src);
           assets[path] = { content: src, type: 'application/json' };
@@ -309,6 +392,7 @@ export class AngularBrowserBuilder {
       const routed = srcs.some((src) => src.includes('<router-outlet'));
       const roots = allSelectors.filter((s, i) => !usedTags.has(s) && !(routed && i > 0));
       this.lastGood = { main: this.main, modules, externals, assets, roots };
+      this._lastStyles = styles;
       this._ensureFrame();
       if (this.booted) {
         this._sendToFrame({ type: 'bootstrap', ...this.lastGood });
@@ -322,6 +406,39 @@ export class AngularBrowserBuilder {
       });
     } catch (err) {
       const entry = this.log('Pipeline', 'error', 'compile error — keeping last-good build', { message: err.message, stack: err.stack });
+      this.emit('compileError', entry);
+    }
+    return this;
+  }
+
+  /** Style-only fast refresh (Phase 8): recompile the stylesheets and ask the sandbox to
+   *  swap the text of the live <style> nodes. The app is never torn down, so component
+   *  state AND the active route survive an SCSS/CSS edit. Falls back to a full soft
+   *  reload when a stylesheet cannot be mapped onto its live node. */
+  async _patchStyles() {
+    try {
+      const assets = this.lastGood.assets || {};
+      const next = {};
+      for (const [path, src] of this.files) {
+        const ext = extname(path);
+        if (ext === 'scss') next[path] = this._rewriteCssAssets(await this._compileScss(src, path), assets);
+        else if (ext === 'css') next[path] = this._rewriteCssAssets(src, assets);
+      }
+      const styles = {};
+      for (const [path, to] of Object.entries(next)) {
+        const from = this._lastStyles[path];
+        if (from !== to) styles[path] = { from, to };
+      }
+      if (!Object.keys(styles).length) {
+        this.log('HMR', 'info', 'styles unchanged — nothing to patch');
+        this.emit('success', { ...this.lastGood });
+        return this;
+      }
+      this._pendingPatch = { styles, next };
+      this.log('HMR', 'info', 'patching styles in place (fast refresh)', { files: Object.keys(styles) });
+      this._sendToFrame({ type: 'patchStyles', styles });
+    } catch (err) {
+      const entry = this.log('Pipeline', 'error', 'scss compile error — keeping last-good build', { message: err.message, stack: err.stack });
       this.emit('compileError', entry);
     }
     return this;
